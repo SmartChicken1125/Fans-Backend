@@ -11,7 +11,6 @@ import { FastifyTypebox } from "../../types.js";
 import { UserRespBody, UserSearchPageQuery, UsersRespBody } from "./schemas.js";
 import { ModelConverter } from "../../models/modelConverter.js";
 import { DEFAULT_PAGE_SIZE, isOutOfRange } from "../../../common/pagination.js";
-import { logger } from "@sentry/utils";
 
 export default async function routes(fastify: FastifyTypebox) {
 	const { container } = fastify;
@@ -124,75 +123,6 @@ export default async function routes(fastify: FastifyTypebox) {
 				return reply.status(200).send(result);
 			} catch (err) {
 				request.log.error(err, `Error on get users/${id}`);
-				return reply.sendError(APIErrors.GENERIC_ERROR);
-			}
-		},
-	);
-
-	fastify.post<{ Params: IdParams }>(
-		"/active-userlist/:id",
-		{
-			schema: { params: IdParamsValidator },
-			preHandler: [
-				sessionManager.sessionPreHandler,
-				sessionManager.requireAuthHandler,
-			],
-		},
-		async (request, reply) => {
-			const session = request.session!;
-			const { id: userlistId } = request.params;
-			try {
-				const userlist = await prisma.userList.count({
-					where: {
-						userId: BigInt(session.userId),
-						id: BigInt(userlistId),
-					},
-				});
-
-				if (userlist < 1) {
-					return reply.sendError(
-						APIErrors.ITEM_NOT_FOUND("UserList"),
-					);
-				}
-
-				await prisma.user.update({
-					where: {
-						id: BigInt(session.userId),
-					},
-					data: {
-						activeUserListId: BigInt(userlistId),
-					},
-				});
-				return reply.status(200).send();
-			} catch (error) {
-				logger.error(error);
-				return reply.sendError(APIErrors.GENERIC_ERROR);
-			}
-		},
-	);
-
-	fastify.delete(
-		"/active-userlist",
-		{
-			preHandler: [
-				sessionManager.sessionPreHandler,
-				sessionManager.requireAuthHandler,
-			],
-		},
-		async (request, reply) => {
-			const session = request.session!;
-			try {
-				await prisma.user.update({
-					where: {
-						id: BigInt(session.userId),
-					},
-					data: {
-						activeUserListId: null,
-					},
-				});
-				return reply.status(200).send();
-			} catch (error) {
-				logger.error(error);
 				return reply.sendError(APIErrors.GENERIC_ERROR);
 			}
 		},

@@ -33,10 +33,18 @@ export async function resolveAuthenticatedMediaURL(
 	upload: Upload,
 	cloudflareStream: CloudflareStreamService,
 	_mediaUpload: MediaUploadService,
-): Promise<string> {
+): Promise<{
+	url: string;
+	thumbnail?: string;
+}> {
 	let url = upload.url;
+	let thumbnail = upload.thumbnail ?? undefined;
 	if (upload.storage === UploadStorageType.CLOUDFLARE_STREAM) {
 		url = cloudflareStream.getSignedVideoUrl(upload.url);
+		thumbnail = url.replace(
+			"/manifest/video.mpd",
+			"/thumbnails/thumbnail.jpg",
+		);
 	}
 	// TODO: We're using Cloudflare R2 as our S3 provider, which doesn't support ACLs on objects.
 	// So it's pretty pointless to use presigned URLs for now.
@@ -47,7 +55,7 @@ export async function resolveAuthenticatedMediaURL(
 	// ) {
 	// 	url = await mediaUpload.generateGetPresignedUrl(upload.url);
 	// }
-	return url;
+	return { url, thumbnail };
 }
 
 export async function resolveURLsUpload(
@@ -55,11 +63,13 @@ export async function resolveURLsUpload(
 	cloudflareStream: CloudflareStreamService,
 	mediaUpload: MediaUploadService,
 ) {
-	upload.url = await resolveAuthenticatedMediaURL(
+	const { url, thumbnail } = await resolveAuthenticatedMediaURL(
 		upload,
 		cloudflareStream,
 		mediaUpload,
 	);
+	upload.url = url;
+	upload.thumbnail = thumbnail ?? null;
 }
 
 export async function resolveURLsUploads(

@@ -1,8 +1,11 @@
 import { Logger } from "pino";
 import { DateTime, Interval } from "luxon";
-import dinero from "dinero.js";
-import { TaxjarError } from "taxjar/dist/util/types.js";
-import { MeetingStatus, TransactionStatus } from "@prisma/client";
+import {
+	MeetingStatus,
+	MeetingUser,
+	TransactionStatus,
+	User,
+} from "@prisma/client";
 import { setInterval } from "node:timers/promises";
 import {
 	DEFAULT_PAGE_SIZE,
@@ -15,20 +18,29 @@ import SessionManagerService, {
 } from "../../../../common/service/SessionManagerService.js";
 import SnowflakeService from "../../../../common/service/SnowflakeService.js";
 import AuthorizeNetService from "../../../../common/service/AuthorizeNetService.js";
-import FeesCalculator from "../../../../common/service/FeesCalculatorService.js";
-import SiftService from "../../../../common/service/SiftService.js";
 import { IdParams } from "../../../../common/validators/schemas.js";
 import { IdParamsValidator } from "../../../../common/validators/validation.js";
 import { FastifyTypebox } from "../../../types.js";
+import { ModelConverter } from "../../../models/modelConverter.js";
+import { IMeeting } from "../../../CommonAPISchemas.js";
+import APIErrors from "../../../errors/index.js";
+import { MeetingService } from "../../../../common/service/MeetingService.js";
+import RPCManagerService from "../../../../common/service/RPCManagerService.js";
+import { PaymentService } from "../../../../common/service/PaymentService.js";
 import { CreateMeetingBody, GetChimeReply, MeetingsQuery } from "./schemas.js";
 import {
 	CreateMeetingBodyValidator,
 	MeetingQueryValidator,
 } from "./validation.js";
-import { ModelConverter } from "../../../models/modelConverter.js";
-import { IMeeting } from "../../../CommonAPISchemas.js";
-import APIErrors from "../../../errors/index.js";
-import { MeetingService } from "../../../../common/service/MeetingService.js";
+import { MAX_MEETING_DURATION } from "../durations/validation.js";
+import {
+	meetingAccepted,
+	meetingCancelled,
+	meetingRequested,
+} from "../../../../common/rpc/MeetingRPC.js";
+import { TaxjarError } from "taxjar/dist/util/types.js";
+
+const DECIMAL_TO_CENT_FACTOR = 100;
 
 export default async function routes(fastify: FastifyTypebox) {
 	const { container } = fastify;
@@ -39,69 +51,23 @@ export default async function routes(fastify: FastifyTypebox) {
 	const snowflake = await container.resolve(SnowflakeService);
 	const meetingService = await container.resolve(MeetingService);
 	const authorizeNetService = await container.resolve(AuthorizeNetService);
-	const feesCalculator = await container.resolve(FeesCalculator);
-	const siftService = await container.resolve(SiftService);
+	const paymentService = await container.resolve(PaymentService);
+	const rpcService = await container.resolve(RPCManagerService);
 
-	fastify.post<{ Body: CreateMeetingBody }>(
-		"/",
+	fastify.post<{
+		Body: CreateMeetingBody;
+	}>(
+		"/price",
 		{
 			schema: { body: CreateMeetingBodyValidator },
 			preHandler: [
 				sessionManager.sessionPreHandler,
 				sessionManager.requireAuthHandler,
-				authorizeNetService.webhookPrehandler,
+				paymentService.requirePaymentProfile,
 			],
 		},
 		async (request, reply) => {
-			const session = request.session as Session;
-			const user = await session.getUser(prisma);
-
-			// if (
-			// 	request.body.customerPaymentProfileId !==
-			// 	process.env.VIDEOCALL_BYPASS_PAYMENT_TOKEN
-			// ) {
-			// 	return reply.sendError(APIErrors.PERMISSION_ERROR);
-			// }
-
-			// Validate payment method
-			const paymentMethod = await prisma.paymentMethod.findFirst({
-				where: {
-					userId: user.id,
-					provider: "AuthorizeNet",
-				},
-			});
-
-			if (!paymentMethod) {
-				return reply.sendError(APIErrors.NO_PAYMENT_METHOD_FOUND);
-			}
-
-			const customerProfile =
-				await authorizeNetService.fetchCustomerProfile(
-					paymentMethod.token,
-				);
-
-			if (customerProfile.getMessages().getResultCode() !== "Ok") {
-				return reply.sendError(
-					APIErrors.PAYMENT_METHOD_FETCH_FAILED(
-						customerProfile.getMessages().getMessage()[0].getText(),
-					),
-				);
-			}
-
-			const customerPaymentProfile =
-				customerProfile.profile.paymentProfiles.find(
-					(profile: any) =>
-						profile.customerPaymentProfileId ===
-						request.body.customerPaymentProfileId,
-				);
-
-			if (!customerPaymentProfile) {
-				return reply.sendError(APIErrors.PAYMENT_METHOD_NOT_FOUND);
-			}
-
-			if (!customerProfile) {
-				return reply.sendError(APIErrors.NO_PAYMENT_METHOD_FOUND);
-			}
+			const session = request.session!;
 
 			const creator = await prisma.profile.findFirst({
 				where: { id: BigInt(request.body.hostId) },
@@ -113,19 +79,114 @@ export default async function routes(fastify: FastifyTypebox) {
 			}
 
 			// Validate duration
-			const durations = await prisma.meetingDuration.findFirst({
+			const duration = await prisma.meetingDuration.findFirst({
 				where: {
 					creatorId: creator.id,
 					length: request.body.duration,
 					isEnabled: true,
 				},
 			});
-			if (!durations) {
+			if (!duration) {
 				return reply.sendError(APIErrors.INVALID_DURATION);
 			}
 
+			if (request.body.customerPaymentProfileId) {
+				const feesOutput = await paymentService.calculateVideoCallPrice(
+					session,
+					duration.price * DECIMAL_TO_CENT_FACTOR,
+					request.body.customerPaymentProfileId,
+				);
+
+				if (feesOutput instanceof TaxjarError) {
+					return reply.sendError(
+						APIErrors.PAYMENT_FAILED(feesOutput.detail),
+					);
+				}
+
+				reply.send({
+					amount:
+						feesOutput.amount.getAmount() / DECIMAL_TO_CENT_FACTOR,
+					platformFee:
+						feesOutput.platformFee.getAmount() /
+						DECIMAL_TO_CENT_FACTOR,
+					vatFee:
+						feesOutput.vatFee.getAmount() / DECIMAL_TO_CENT_FACTOR,
+					totalAmount:
+						feesOutput.totalAmount.getAmount() /
+						DECIMAL_TO_CENT_FACTOR,
+				});
+			}
+
+			return reply.status(201).send();
+		},
+	);
+
+	fastify.post<{ Body: CreateMeetingBody }>(
+		"/",
+		{
+			schema: { body: CreateMeetingBodyValidator },
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+				paymentService.requirePaymentProfile,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session as Session;
+			const user = await session.getUser(prisma);
+
+			if (process.env.VIDEOCALL_BYPASS_PAYMENT_TOKEN) {
+				return reply.sendError(APIErrors.PERMISSION_ERROR);
+			}
+
+			// Validate payment method
+			if (request.body.customerPaymentProfileId) {
+				const error = await paymentService.validatePaymentMethod(
+					request.session!,
+					request.body.customerPaymentProfileId,
+				);
+				if (error) {
+					return reply.sendError(error);
+				}
+			}
+
+			const creator = await prisma.profile.findFirst({
+				where: { id: BigInt(request.body.hostId) },
+			});
+			if (!creator || creator.userId === BigInt(session.userId)) {
+				return reply.sendError(
+					APIErrors.INVALID_MEETING_HOST(request.body.hostId),
+				);
+			}
+
+			const settings = await prisma.meetingSettings.findFirst({
+				where: { profileId: creator.id },
+			});
+			if (!settings) {
+				return reply.sendError(APIErrors.MEETING_SETTINGS_NOT_FOUND);
+			}
+			if (!settings.videoCallsEnabled) {
+				return reply.sendError(APIErrors.MEETING_DISABLED_BY_CREATOR);
+			}
+
+			// Validate duration
+			const duration = await prisma.meetingDuration.findFirst({
+				where: {
+					creatorId: creator.id,
+					length: request.body.duration,
+					isEnabled: true,
+				},
+			});
+			if (!duration) {
+				return reply.sendError(APIErrors.INVALID_DURATION);
+			}
+
+			const isInstantMeeting = request.body.startDate === "now";
+
 			// Validate start date
-			const startTime = DateTime.fromISO(request.body.startDate);
+			const startTime = isInstantMeeting
+				? DateTime.now().plus({ minute: 15 })
+				: DateTime.fromISO(request.body.startDate);
 			const fromNowInterval = Interval.fromDateTimes(
 				DateTime.now(),
 				startTime,
@@ -148,7 +209,11 @@ export default async function routes(fastify: FastifyTypebox) {
 			const existingMeetings = await prisma.meeting.findMany({
 				where: {
 					hostId: creator.id,
-					startDate: { gte: startTime.toJSDate() },
+					startDate: {
+						gte: startTime
+							.minus({ minute: MAX_MEETING_DURATION })
+							.toJSDate(),
+					},
 					AND: [
 						{
 							status: { not: MeetingStatus.Cancelled },
@@ -178,6 +243,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				where: { creatorId: creator.id },
 			});
 			if (
+				!isInstantMeeting &&
 				!intervals.some((interval) => {
 					const intervalStartTime = DateTime.fromJSDate(
 						interval.startTime,
@@ -192,7 +258,7 @@ export default async function routes(fastify: FastifyTypebox) {
 								ModelConverter.weekDay2Index(interval.day) + 1,
 						});
 					const intervalEndTime = intervalStartTime.plus({
-						minute: interval.length,
+						minute: interval.length + 1,
 					});
 					const timeInterval = Interval.fromDateTimes(
 						intervalStartTime,
@@ -229,30 +295,6 @@ export default async function routes(fastify: FastifyTypebox) {
 				return reply.sendError(APIErrors.MEETING_VACATION_CONFLICT);
 			}
 
-			// Calculate fees
-			const customerInformation = {
-				country: customerPaymentProfile.billTo.country,
-				state: customerPaymentProfile.billTo.state,
-				city: customerPaymentProfile.billTo.city,
-				zip: customerPaymentProfile.billTo.zip,
-				address: customerPaymentProfile.billTo.address,
-			};
-
-			const amountDinero = dinero({
-				amount: durations.price,
-			});
-
-			const feesOutput = await feesCalculator.purchaseServiceFees(
-				amountDinero.getAmount(),
-				customerInformation,
-			);
-
-			if (feesOutput instanceof TaxjarError) {
-				return reply.sendError(
-					APIErrors.PAYMENT_FAILED(feesOutput.detail),
-				);
-			}
-
 			// Create meeting
 			const meeting = await meetingService.create({
 				host: creator,
@@ -260,183 +302,30 @@ export default async function routes(fastify: FastifyTypebox) {
 				startDate: meetingTimeInterval.start?.toUTC()?.toJSDate(),
 				endDate: meetingTimeInterval.end?.toUTC()?.toJSDate(),
 				topics: request.body.topics,
+				duration,
+				isInstant: isInstantMeeting,
 			});
 
-			// Create transaction
-			const videoCallPurchase = await prisma.videoCallPurchase.create({
-				data: {
-					id: snowflake.gen(),
-					fanId: user.id,
-					creatorId: creator.id,
-					meetingId: meeting.id,
-					paymentMethodId: paymentMethod.id,
-					paymentProfileId:
-						customerPaymentProfile.customerPaymentProfileId,
-
-					provider: "AuthorizeNet",
-					amount: feesOutput.amount.getAmount(),
-					processingFee: 0,
-					platformFee: feesOutput.platformFee.getAmount(),
-					vatFee: feesOutput.vatFee.getAmount(),
-					status: "Initialized",
-				},
-			});
-
-			const siftTransaction = async (
-				status: "$success" | "$failure" | "$pending",
-				orderId?: string,
-			) => {
-				return await siftService.transaction({
-					$user_id: user.id.toString(),
-					$user_email: user.email,
-					$amount: feesOutput.totalAmount.getAmount() * 10000,
-					$currency_code: "USD",
-					$order_id: orderId,
-					$transaction_id: videoCallPurchase.id.toString(),
-					$transaction_type: "$sale",
-					$transaction_status: status,
-					$ip: request.ip,
-					$seller_user_id: creator.id.toString(),
-					$billing_address: {
-						$name:
-							customerPaymentProfile.billTo.firstName +
-							" " +
-							customerPaymentProfile.billTo.lastName,
-						$address_1: customerPaymentProfile.billTo.address,
-						$city: customerPaymentProfile.billTo.city,
-						$region: customerPaymentProfile.billTo.state,
-						$country: customerPaymentProfile.billTo.country,
-						$zipcode: customerPaymentProfile.billTo.zip,
-					},
-					$payment_method: {
-						$payment_type: "$credit_card",
-						$payment_gateway: "$authorizenet",
-						$account_holder_name:
-							customerPaymentProfile.billTo.firstName +
-							" " +
-							customerPaymentProfile.billTo.lastName,
-						$card_last4:
-							customerPaymentProfile.payment.creditCard.cardNumber.slice(
-								-4,
-							),
-						$verification_status: "$success",
-					},
-					$browser: {
-						$user_agent: request.headers["user-agent"] ?? "",
-						$accept_language:
-							request.headers["accept-language"] ?? "",
-					},
-				});
-			};
-
-			const response = await siftTransaction("$pending");
-
-			const hasBadPaymentAbuseDecision =
-				response.score_response.workflow_statuses.some((workflow) =>
-					workflow.history.some(
-						(historyItem) =>
-							historyItem.config.decision_id ===
-							"looks_bad_payment_abuse",
-					),
+			if (request.body.customerPaymentProfileId) {
+				const error = await paymentService.bookVideoCall(
+					session!,
+					request,
+					creator,
+					user,
+					meeting,
+					duration.price * DECIMAL_TO_CENT_FACTOR,
+					request.body.customerPaymentProfileId,
 				);
-
-			if (hasBadPaymentAbuseDecision) {
-				await prisma.videoCallPurchase.update({
-					where: { id: videoCallPurchase.id },
-					data: {
-						status: "Failed",
-						error: "Transaction flagged as fraudulent.",
-					},
-				});
-
-				await siftTransaction("$failure");
-
-				return reply.sendError(
-					APIErrors.PAYMENT_FAILED(
-						"Failed because of fraud detection, if you believe this is an error contact support.",
-					),
-				);
-			}
-
-			const paymentResponse =
-				await authorizeNetService.authorizeCreditCard({
-					customerProfileId:
-						customerProfile.profile.customerProfileId,
-					customerPaymentProfileId:
-						customerPaymentProfile.customerPaymentProfileId,
-					description: `Video Call for ${user.username} with ${creator.displayName}`,
-					amount: feesOutput.totalAmount.getAmount(),
-					merchantData: {
-						userId: user.id.toString(),
-						transactionId: videoCallPurchase.id.toString(),
-					},
-				});
-
-			if (paymentResponse.getMessages().getResultCode() !== "Ok") {
-				await prisma.videoCallPurchase.update({
-					where: { id: videoCallPurchase.id },
-					data: {
-						status: "Failed",
-						error: paymentResponse
-							.getMessages()
-							.getMessage()[0]
-							.getText(),
-					},
-				});
-
-				await siftTransaction(
-					"$failure",
-					paymentResponse.transactionResponse.transId,
-				);
-
-				return reply.sendError(
-					APIErrors.PAYMENT_FAILED(
-						paymentResponse.getMessages().getMessage()[0].getText(),
-					),
-				);
-			}
-
-			await prisma.videoCallPurchase.update({
-				where: { id: videoCallPurchase.id },
-				data: {
-					status: "Submitted",
-					transactionId: paymentResponse
-						.getTransactionResponse()
-						?.getTransId(),
-				},
-			});
-
-			const POLL_INTERVAL = 1000;
-			const MAX_DURATION = 60000;
-
-			const startDateTime = Date.now();
-
-			for await (const _ of setInterval(POLL_INTERVAL)) {
-				const videoCallPurchaseStatus =
-					await prisma.videoCallPurchase.findUnique({
-						where: { id: videoCallPurchase.id },
-						select: { status: true },
-					});
-
-				if (
-					videoCallPurchaseStatus?.status ===
-					TransactionStatus.Pending
-				) {
-					clearInterval(POLL_INTERVAL);
-					return reply
-						.status(200)
-						.send(ModelConverter.toIMeeting(meeting));
-				}
-
-				if (Date.now() - startDateTime > MAX_DURATION) {
-					clearInterval(POLL_INTERVAL);
-					return reply.sendError(
-						APIErrors.PAYMENT_FAILED(
-							"Transaction processing took too long. Please check back later.",
-						),
-					);
+				if (error) {
+					return reply.sendError(error);
 				}
 			}
+
+			const responseMeeting = ModelConverter.toIMeeting(meeting);
+
+			meetingRequested(rpcService, creator.userId, responseMeeting);
+
+			return reply.status(200).send(responseMeeting);
 		},
 	);
 
@@ -494,7 +383,6 @@ export default async function routes(fastify: FastifyTypebox) {
 				sessionManager.sessionPreHandler,
 				sessionManager.requireAuthHandler,
 				sessionManager.requireProfileHandler,
-				authorizeNetService.webhookPrehandler,
 			],
 		},
 		async (request, reply) => {
@@ -523,6 +411,23 @@ export default async function routes(fastify: FastifyTypebox) {
 				data: { status: MeetingStatus.Cancelled },
 			});
 
+			const meeting = await prisma.meeting.findFirst({
+				where: { id: BigInt(meetingId) },
+			});
+			const meetingUsers = await prisma.meetingUser.findMany({
+				where: { meetingId: BigInt(meetingId) },
+			});
+
+			if (meeting) {
+				meetingUsers.forEach((meetingUser) => {
+					meetingCancelled(
+						rpcService,
+						meetingUser.userId,
+						ModelConverter.toIMeeting(meeting),
+					);
+				});
+			}
+
 			return reply.send();
 		},
 	);
@@ -539,7 +444,6 @@ export default async function routes(fastify: FastifyTypebox) {
 				sessionManager.sessionPreHandler,
 				sessionManager.requireAuthHandler,
 				sessionManager.requireProfileHandler,
-				authorizeNetService.webhookPrehandler,
 			],
 		},
 		async (request, reply) => {
@@ -551,172 +455,58 @@ export default async function routes(fastify: FastifyTypebox) {
 				return reply.sendError(APIErrors.PROFILE_NOT_FOUND);
 			}
 
-			const videoCallPurchase = await prisma.videoCallPurchase.findFirst({
+			if (process.env.VIDEOCALL_BYPASS_PAYMENT_TOKEN) {
+				return reply.sendError(APIErrors.PERMISSION_ERROR);
+			}
+
+			const meeting = await prisma.meeting.findFirst({
 				where: {
-					creatorId: profile.id,
-					status: TransactionStatus.Pending,
-					meetingId: BigInt(meetingId),
-				},
-				orderBy: { createdAt: "desc" },
-				include: {
-					fan: true,
-					creator: true,
-					paymentMethod: true,
+					id: BigInt(meetingId),
 				},
 			});
-
+			if (!meeting) {
+				return reply.sendError(APIErrors.MEETING_NOT_FOUND);
+			}
 			if (
-				!videoCallPurchase?.transactionId ||
-				!videoCallPurchase.paymentMethod
+				DateTime.fromJSDate(meeting.startDate).minus({ minute: 6 }) <
+				DateTime.now()
 			) {
-				return reply.sendError(APIErrors.TRANSACTION_NOT_FOUND);
+				// Too late, meeting will be automatically declined
+				return reply.sendError(APIErrors.MEETING_INVALID_STATE);
 			}
 
-			const customerProfile =
-				await authorizeNetService.fetchCustomerProfile(
-					videoCallPurchase.paymentMethod.token,
-				);
-
-			if (customerProfile.getMessages().getResultCode() !== "Ok") {
-				return reply.sendError(
-					APIErrors.PAYMENT_METHOD_FETCH_FAILED(
-						customerProfile.getMessages().getMessage()[0].getText(),
-					),
-				);
+			const error = await paymentService.purchaseVideoCall(
+				session,
+				request,
+				meetingId,
+				profile,
+			);
+			if (error) {
+				return reply.sendError(error);
 			}
 
-			const customerPaymentProfile =
-				customerProfile.profile.paymentProfiles.find(
-					(profile: any) =>
-						profile.customerPaymentProfileId ===
-						videoCallPurchase.paymentProfileId,
-				);
+			await prisma.meeting.update({
+				where: {
+					id: BigInt(meetingId),
+				},
+				data: { status: MeetingStatus.Accepted },
+			});
 
-			if (!customerPaymentProfile) {
-				return reply.sendError(APIErrors.PAYMENT_METHOD_NOT_FOUND);
-			}
+			const meetingUsers = await prisma.meetingUser.findMany({
+				where: { meetingId: BigInt(meetingId) },
+			});
 
-			if (!customerProfile) {
-				return reply.sendError(APIErrors.NO_PAYMENT_METHOD_FOUND);
-			}
-
-			const siftTransaction = async (
-				status: "$success" | "$failure" | "$pending",
-				orderId?: string,
-			) => {
-				return await siftService.transaction({
-					$user_id: videoCallPurchase.fan.id.toString(),
-					$user_email: videoCallPurchase.fan.email,
-					$amount: videoCallPurchase.amount * 10000,
-					$currency_code: "USD",
-					$order_id: orderId,
-					$transaction_id: videoCallPurchase.id.toString(),
-					$transaction_type: "$sale",
-					$transaction_status: status,
-					$ip: request.ip,
-					$seller_user_id: videoCallPurchase.creator.id.toString(),
-					$billing_address: {
-						$name:
-							customerPaymentProfile.billTo.firstName +
-							" " +
-							customerPaymentProfile.billTo.lastName,
-						$address_1: customerPaymentProfile.billTo.address,
-						$city: customerPaymentProfile.billTo.city,
-						$region: customerPaymentProfile.billTo.state,
-						$country: customerPaymentProfile.billTo.country,
-						$zipcode: customerPaymentProfile.billTo.zip,
-					},
-					$payment_method: {
-						$payment_type: "$credit_card",
-						$payment_gateway: "$authorizenet",
-						$account_holder_name:
-							customerPaymentProfile.billTo.firstName +
-							" " +
-							customerPaymentProfile.billTo.lastName,
-						$card_last4:
-							customerPaymentProfile.payment.creditCard.cardNumber.slice(
-								-4,
-							),
-						$verification_status: "$success",
-					},
-					$browser: {
-						$user_agent: request.headers["user-agent"] ?? "",
-						$accept_language:
-							request.headers["accept-language"] ?? "",
-					},
-				});
-			};
-
-			const paymentResponse =
-				await authorizeNetService.capturePreviouslyAuthorizedAmount({
-					transactionId: videoCallPurchase.transactionId,
-					description: `Video Call for ${videoCallPurchase.fan.username} with ${videoCallPurchase.creator.displayName}`,
-					amount: videoCallPurchase.amount,
-					merchantData: {
-						userId: videoCallPurchase.fan.id.toString(),
-						transactionId: videoCallPurchase.id.toString(),
-					},
-				});
-
-			if (paymentResponse.getMessages().getResultCode() !== "Ok") {
-				await prisma.videoCallPurchase.update({
-					where: { id: videoCallPurchase.id },
-					data: {
-						status: "Failed",
-						error: paymentResponse
-							.getMessages()
-							.getMessage()[0]
-							.getText(),
-					},
-				});
-
-				await siftTransaction(
-					"$failure",
-					paymentResponse.transactionResponse.transId,
-				);
-
-				return reply.sendError(
-					APIErrors.PAYMENT_FAILED(
-						paymentResponse.getMessages().getMessage()[0].getText(),
-					),
-				);
-			}
-
-			const POLL_INTERVAL = 1000;
-			const MAX_DURATION = 60000;
-
-			const startDateTime = Date.now();
-
-			for await (const _ of setInterval(POLL_INTERVAL)) {
-				const videoCallPurchaseStatus =
-					await prisma.videoCallPurchase.findUnique({
-						where: { id: videoCallPurchase.id },
-						select: { status: true },
-					});
-
-				if (
-					videoCallPurchaseStatus?.status ===
-					TransactionStatus.Successful
-				) {
-					await prisma.meeting.update({
-						where: {
-							id: BigInt(meetingId),
-						},
-						data: { status: MeetingStatus.Accepted },
-					});
-					clearInterval(POLL_INTERVAL);
-					return reply.send();
-				}
-
-				if (Date.now() - startDateTime > MAX_DURATION) {
-					clearInterval(POLL_INTERVAL);
-					return reply.sendError(
-						APIErrors.PAYMENT_FAILED(
-							"Transaction processing took too long. Please check back later.",
-						),
+			if (meeting) {
+				meetingUsers.forEach((meetingUser) => {
+					meetingAccepted(
+						rpcService,
+						meetingUser.userId,
+						ModelConverter.toIMeeting(meeting),
 					);
-				}
+				});
 			}
+
+			return reply.status(200).send();
 		},
 	);
 
@@ -742,6 +532,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				after,
 				status,
 				sort,
+				withAttendees,
 			} = request.query;
 
 			const session = request.session!;
@@ -776,15 +567,27 @@ export default async function routes(fastify: FastifyTypebox) {
 				...statusQuery,
 			};
 
-			const orderMap = {
-				newest: { createdAt: "desc" },
-				oldest: { createdAt: "asc" },
-			} as const;
-			const orderBy = (sort && orderMap[sort]) || { createdAt: "desc" };
-
-			const total = await prisma.meeting.count({
-				where,
+			const orderBy = sort ? [] : ([{ createdAt: "desc" }] as any);
+			const sortFields = ["createdAt", "startDate", "price"];
+			sort?.split(",")?.forEach((option) => {
+				const [field, direction = "desc"] = option.split(":");
+				if (field === "oldest") {
+					orderBy.push({ createdAt: "asc" });
+				}
+				if (
+					(sortFields.includes(field) && direction === "asc") ||
+					direction === "desc"
+				) {
+					orderBy.push({ [field]: direction });
+				}
 			});
+
+			const aggregate = await prisma.meeting.aggregate({
+				where,
+				_sum: { price: true },
+				_count: { id: true },
+			});
+			const total = aggregate._count.id;
 			if (isOutOfRange(page, size, total)) {
 				return reply.sendError(APIErrors.OUT_OF_RANGE);
 			}
@@ -794,13 +597,34 @@ export default async function routes(fastify: FastifyTypebox) {
 				orderBy,
 				take: size,
 				skip: (page - 1) * size,
+				...(withAttendees
+					? { include: { users: { include: { user: true } } } }
+					: {}),
 			});
+
+			const results = meetings
+				.map(ModelConverter.toIMeeting)
+				.map((meeting, index) => {
+					if (withAttendees) {
+						return {
+							...meeting,
+							// @ts-ignore
+							attendees: meetings[index].users.map(
+								(meetingUser: MeetingUser & { user: User }) =>
+									ModelConverter.toIUser(meetingUser.user),
+							),
+						};
+					}
+
+					return meeting;
+				});
 
 			return reply.send({
 				page,
 				size,
 				total,
-				meetings: meetings.map(ModelConverter.toIMeeting),
+				totalPrice: aggregate._sum.price,
+				meetings: results,
 			});
 		},
 	);
@@ -842,6 +666,44 @@ export default async function routes(fastify: FastifyTypebox) {
 			}
 
 			return reply.send(ModelConverter.toIMeeting(meeting));
+		},
+	);
+
+	fastify.get<{
+		Params: IdParams;
+	}>(
+		"/:id/attendees",
+		{
+			schema: {
+				params: IdParamsValidator,
+			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session!;
+
+			const meeting = await prisma.meeting.findFirst({
+				where: { id: BigInt(request.params.id) },
+				include: { users: { include: { user: true } } },
+			});
+
+			if (!meeting) {
+				return reply.sendError(APIErrors.MEETING_NOT_FOUND);
+			}
+
+			const attendees = meeting.users.map((meetingUser) =>
+				ModelConverter.toIUser(meetingUser.user),
+			);
+
+			if (!attendees.some((attendee) => attendee.id === session.userId)) {
+				// only meeting attendants can query meeting
+				return reply.sendError(APIErrors.PERMISSION_ERROR);
+			}
+
+			return reply.send({ attendees });
 		},
 	);
 

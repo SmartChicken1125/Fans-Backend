@@ -51,14 +51,6 @@ export default async function routes(fastify: FastifyTypebox) {
 				const { page = 1, size = DEFAULT_PAGE_SIZE } = query;
 				const session = request.session!;
 				const profile = (await session.getProfile(prisma))!;
-				const total = await prisma.category.count({
-					where: { profileId: profile.id },
-				});
-
-				if (isOutOfRange(page, size, total)) {
-					return reply.sendError(APIErrors.OUT_OF_RANGE);
-				}
-
 				const categories = await prisma.category.findMany({
 					where: { profileId: profile.id },
 					include: {
@@ -69,6 +61,7 @@ export default async function routes(fastify: FastifyTypebox) {
 							include: { role: true },
 						},
 					},
+					orderBy: { order: "asc" },
 					take: size,
 					skip: (page - 1) * size,
 				});
@@ -80,9 +73,6 @@ export default async function routes(fastify: FastifyTypebox) {
 							ModelConverter.toIRole(r.role),
 						),
 					})),
-					page,
-					size,
-					total,
 				};
 				return reply.send(result);
 			} catch (err) {
@@ -174,7 +164,8 @@ export default async function routes(fastify: FastifyTypebox) {
 			try {
 				const session = request.session!;
 				const profile = (await session.getProfile(prisma))!;
-				const { name, isActive, postIds, roleIds } = request.body;
+				const { name, isActive, postIds, roleIds, order } =
+					request.body;
 				const categoryCount = await prisma.category.count({
 					where: { profileId: profile.id },
 				});
@@ -199,6 +190,7 @@ export default async function routes(fastify: FastifyTypebox) {
 						name,
 						profileId: profile.id,
 						isActive: isActive ? isActive : true,
+						order,
 						posts:
 							postIds && postIds.length > 0
 								? {
@@ -258,7 +250,7 @@ export default async function routes(fastify: FastifyTypebox) {
 			const session = request.session!;
 			const profile = (await session.getProfile(prisma))!;
 			const { id } = request.params;
-			const { name, isActive, roleIds, postIds } = request.body;
+			const { name, isActive, roleIds, postIds, order } = request.body;
 			const category = await prisma.category.findUnique({
 				where: { id: BigInt(id), profileId: profile.id },
 				include: { roles: true, posts: true },
@@ -296,6 +288,7 @@ export default async function routes(fastify: FastifyTypebox) {
 					data: {
 						name,
 						isActive,
+						order,
 						roles: {
 							deleteMany:
 								roleIdsToRemove.length > 0
@@ -371,6 +364,166 @@ export default async function routes(fastify: FastifyTypebox) {
 				where: { id: BigInt(id) },
 			});
 			return reply.status(202).send({ message: "Category is deleted!" });
+		},
+	);
+
+	fastify.post<{ Params: IdParams }>(
+		"/up/:id",
+		{
+			schema: { params: IdParamsValidator },
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+				sessionManager.requireProfileHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session!;
+			const profile = (await session.getProfile(prisma))!;
+			const { id: categoryId } = request.params;
+
+			const category = await prisma.category.findFirst({
+				where: {
+					id: BigInt(categoryId),
+					profileId: profile.id,
+				},
+			});
+			if (!category) {
+				return reply.sendError(APIErrors.PERMISSION_ERROR);
+			}
+
+			const categories = await prisma.category.findMany({
+				where: { profileId: profile.id },
+				include: { roles: { include: { role: true } } },
+				orderBy: { order: "asc" },
+			});
+
+			const oldIndex = categories.findIndex(
+				(c) => c.id.toString() === categoryId,
+			);
+
+			if (oldIndex < 0) {
+				return reply.sendError(APIErrors.PERMISSION_ERROR);
+			} else if (oldIndex === 0) {
+				const result: CategoriesRespBody = {
+					categories: categories.map((c) => ({
+						...ModelConverter.toICategory(c),
+						roles: c.roles.map((r) =>
+							ModelConverter.toIRole(r.role),
+						),
+					})),
+				};
+				return reply.send(result);
+			}
+			await Promise.all(
+				categories.map((c, i) =>
+					prisma.category.update({
+						where: { id: c.id },
+						data: {
+							order:
+								i === oldIndex - 1
+									? i + 1
+									: i === oldIndex
+									? i - 1
+									: i,
+						},
+					}),
+				),
+			);
+
+			const newOrderedCategories = await prisma.category.findMany({
+				where: { profileId: profile.id },
+				include: { roles: { include: { role: true } } },
+				orderBy: { order: "asc" },
+			});
+
+			const result: CategoriesRespBody = {
+				categories: newOrderedCategories.map((c) => ({
+					...ModelConverter.toICategory(c),
+					roles: c.roles.map((r) => ModelConverter.toIRole(r.role)),
+				})),
+			};
+			return reply.send(result);
+		},
+	);
+
+	fastify.post<{ Params: IdParams }>(
+		"/down/:id",
+		{
+			schema: { params: IdParamsValidator },
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+				sessionManager.requireProfileHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session!;
+			const profile = (await session.getProfile(prisma))!;
+			const { id: categoryId } = request.params;
+
+			const category = await prisma.category.findFirst({
+				where: {
+					id: BigInt(categoryId),
+					profileId: profile.id,
+				},
+			});
+			if (!category) {
+				return reply.sendError(APIErrors.PERMISSION_ERROR);
+			}
+
+			const categories = await prisma.category.findMany({
+				where: { profileId: profile.id },
+				include: { roles: { include: { role: true } } },
+				orderBy: { order: "asc" },
+			});
+
+			const oldIndex = categories.findIndex(
+				(c) => c.id.toString() === categoryId,
+			);
+
+			if (oldIndex < 0) {
+				return reply.sendError(APIErrors.PERMISSION_ERROR);
+			} else if (oldIndex === categories.length - 1) {
+				const result: CategoriesRespBody = {
+					categories: categories.map((c) => ({
+						...ModelConverter.toICategory(c),
+						roles: c.roles.map((r) =>
+							ModelConverter.toIRole(r.role),
+						),
+					})),
+				};
+				return reply.send(result);
+			}
+			await Promise.all(
+				categories.map((c, i) =>
+					prisma.category.update({
+						where: { id: c.id },
+						data: {
+							order:
+								i === oldIndex + 1
+									? i - 1
+									: i === oldIndex
+									? i + 1
+									: i,
+						},
+					}),
+				),
+			);
+
+			const newOrderedCategories = await prisma.category.findMany({
+				where: { profileId: profile.id },
+				include: { roles: { include: { role: true } } },
+				orderBy: { order: "asc" },
+			});
+
+			const result: CategoriesRespBody = {
+				categories: newOrderedCategories.map((c) => ({
+					...ModelConverter.toICategory(c),
+					roles: c.roles.map((r) => ModelConverter.toIRole(r.role)),
+				})),
+			};
+			return reply.send(result);
 		},
 	);
 }

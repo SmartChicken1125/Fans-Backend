@@ -9,6 +9,7 @@ export interface CategoryCreateReqBody {
 	isActive?: boolean;
 	postIds?: string[];
 	roleIds?: string[];
+	order?: number;
 }
 
 export interface CategoryUpdateReqBody {
@@ -16,13 +17,14 @@ export interface CategoryUpdateReqBody {
 	isActive?: boolean;
 	postIds?: string[];
 	roleIds?: string[];
+	order?: number;
 }
 
 export type CategoryRespBody = ICategory & { roles: IRole[]; posts?: IPost[] };
 
 export interface CategoriesRespBody {
 	categories: CategoryRespBody[];
-	page: number;
-	size: number;
-	total: number;
+	page?: number;
+	size?: number;
+	total?: number;
 }

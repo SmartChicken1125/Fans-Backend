@@ -3,6 +3,8 @@ import PrismaService from "../common/service/PrismaService.js";
 import RPCManagerService from "../common/service/RPCManagerService.js";
 import SessionManagerService from "../common/service/SessionManagerService.js";
 import {
+	CameoEventType,
+	MeetingEventType,
 	MessageEventType,
 	Opcode,
 	PayloadData,
@@ -15,8 +17,10 @@ import { ChatRPCType } from "../common/rpc/ChatRPC.js";
 import { CloseReason } from "./Constants.js";
 import * as Sentry from "@sentry/node";
 import InboxManagerService from "../common/service/InboxManagerService.js";
-import { IMessage, IUser } from "../web/CommonAPISchemas.js";
+import { IMeeting, IMessage, IUser } from "../web/CommonAPISchemas.js";
 import { UserRPCType } from "../common/rpc/UserRPC.js";
+import { MeetingRPCType } from "../common/rpc/MeetingRPC.js";
+import { CameoRPCType } from "../common/rpc/CameoRPC.js";
 
 const enum SessionState {
 	Unauthenticated = 0,
@@ -116,6 +120,8 @@ class SessionHandler {
 
 		this.#rpc.subscribe(`chat:${user.id}`, this.#onChatRPCMessage);
 		this.#rpc.subscribe(`user:${user.id}`, this.#onUserRPCMessage);
+		this.#rpc.subscribe(`meeting:${user.id}`, this.#onMeetingRPCMessage);
+		this.#rpc.subscribe(`cameo:${user.id}`, this.#onCameoRPCMessage);
 
 		this.#session.sendPayload(Opcode.ReadySession, {
 			userId: user.id,
@@ -139,6 +145,14 @@ class SessionHandler {
 			this.#rpc.unsubscribe(
 				`user:${this.#user.id}`,
 				this.#onUserRPCMessage,
+			);
+			this.#rpc.unsubscribe(
+				`meeting:${this.#user.id}`,
+				this.#onMeetingRPCMessage,
+			);
+			this.#rpc.unsubscribe(
+				`cameo:${this.#user.id}`,
+				this.#onCameoRPCMessage,
 			);
 		}
 	}
@@ -174,6 +188,87 @@ class SessionHandler {
 					Opcode.UserSync,
 					data.data as Partial<IUser>,
 				);
+				break;
+			}
+		}
+	};
+
+	#onMeetingRPCMessage = async (data: Json) => {
+		if (!data || typeof data !== "object" || Array.isArray(data)) return;
+
+		this.#logger.debug("Meeting RPC message received %s", data);
+		const type = data.type as MeetingRPCType;
+		switch (type) {
+			case MeetingRPCType.MeetingRequested: {
+				this.#session.sendPayload(Opcode.MeetingEvent, {
+					type: MeetingEventType.Requested,
+					meeting: data.data,
+				});
+				break;
+			}
+			case MeetingRPCType.MeetingAccepted: {
+				this.#session.sendPayload(Opcode.MeetingEvent, {
+					type: MeetingEventType.Accepted,
+					meeting: data.data,
+				});
+				break;
+			}
+			case MeetingRPCType.MeetingCancelled: {
+				this.#session.sendPayload(Opcode.MeetingEvent, {
+					type: MeetingEventType.Cancelled,
+					meeting: data.data,
+				});
+				break;
+			}
+			case MeetingRPCType.MeetingReminder: {
+				this.#session.sendPayload(
+					Opcode.MeetingReminder,
+					data.data as Partial<IMeeting>,
+				);
+				break;
+			}
+		}
+	};
+
+	#onCameoRPCMessage = async (data: Json) => {
+		if (!data || typeof data !== "object" || Array.isArray(data)) return;
+
+		this.#logger.debug("Cameo RPC message received %s", data);
+		const type = data.type as CameoRPCType;
+		switch (type) {
+			case CameoRPCType.CameoRequested: {
+				this.#session.sendPayload(Opcode.CameoEvent, {
+					type: CameoEventType.Requested,
+					order: data.data,
+				});
+				break;
+			}
+			case CameoRPCType.CameoAccepted: {
+				this.#session.sendPayload(Opcode.CameoEvent, {
+					type: CameoEventType.Accepted,
+					order: data.data,
+				});
+				break;
+			}
+			case CameoRPCType.CameoDeclined: {
+				this.#session.sendPayload(Opcode.CameoEvent, {
+					type: CameoEventType.Declined,
+					order: data.data,
+				});
+				break;
+			}
+			case CameoRPCType.CameoCancelled: {
+				this.#session.sendPayload(Opcode.CameoEvent, {
+					type: CameoEventType.Cancelled,
+					order: data.data,
+				});
+				break;
+			}
+			case CameoRPCType.CameoCompleted: {
+				this.#session.sendPayload(Opcode.CameoEvent, {
+					type: CameoEventType.Completed,
+					order: data.data,
+				});
 				break;
 			}
 		}

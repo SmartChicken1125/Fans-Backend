@@ -32,7 +32,8 @@ import {
 	AgeVerifyOndatoRespBody,
 	AgeVerifyOndatoWebhookReqBody,
 	AvatarCreateReqBody,
-	PreviewCreateReqBody,
+	PreviewUpdateReqBody,
+	PreviewUpdateRespBody,
 	ProfileCreateReqBody,
 	ProfileFilterQuery,
 	ProfileLinkReqBody,
@@ -46,7 +47,7 @@ import {
 import {
 	AgeVerifyOndatoWebhookReqBodyValidator,
 	AvatarCreateReqBodyValidator,
-	PreviewCreateReqBodyValidator,
+	PreviewUpdateReqBodyValidator,
 	ProfileFilterQueryValidator,
 	ProfileLinkReqBodyValidator,
 	ProfileReqBodyValidator,
@@ -110,11 +111,7 @@ export default async function routes(fastify: FastifyTypebox) {
 							updatedAt: { gt: oneDayBefore },
 						},
 						include: {
-							storyMedias: {
-								include: {
-									upload: true,
-								},
-							},
+							upload: true,
 							_count: {
 								select: {
 									storyComments: true,
@@ -130,11 +127,7 @@ export default async function routes(fastify: FastifyTypebox) {
 								include: {
 									story: {
 										include: {
-											storyMedias: {
-												include: {
-													upload: true,
-												},
-											},
+											upload: true,
 											_count: {
 												select: {
 													storyComments: true,
@@ -192,6 +185,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				subscriptionCount,
 				storyComments,
 				storyLikes,
+				review,
 			] = await Promise.all([
 				prisma.upload.count({
 					where: {
@@ -245,6 +239,17 @@ export default async function routes(fastify: FastifyTypebox) {
 				prisma.storyLike.findMany({
 					where: { userId: BigInt(session.userId) },
 					select: { storyId: true },
+				}),
+				prisma.review.aggregate({
+					_avg: {
+						score: true,
+					},
+					_count: {
+						score: true,
+					},
+					where: {
+						creatorId: profile.id,
+					},
 				}),
 			]);
 
@@ -300,16 +305,20 @@ export default async function routes(fastify: FastifyTypebox) {
 				imageCount,
 				videoCount,
 				subscriptionCount,
+				review: {
+					total: review._count.score,
+					score: review._avg.score ?? 0,
+				},
 			};
 			return reply.send(result);
 		},
 	);
 
-	fastify.put<{ Body: PreviewCreateReqBody }>(
+	fastify.put<{ Body: PreviewUpdateReqBody }>(
 		"/me/preview",
 		{
 			schema: {
-				body: PreviewCreateReqBodyValidator,
+				body: PreviewUpdateReqBodyValidator,
 			},
 			preHandler: [
 				sessionManager.sessionPreHandler,
@@ -323,7 +332,7 @@ export default async function routes(fastify: FastifyTypebox) {
 			const profile = (await session.getProfile(prisma))!;
 
 			const existedPreviews = await prisma.profilePreview.findMany({
-				where: { profileId: BigInt(profile.id) },
+				where: { profileId: profile.id },
 			});
 
 			const previewsToRemove = existedPreviews
@@ -350,12 +359,12 @@ export default async function routes(fastify: FastifyTypebox) {
 			});
 
 			const profilePreviews = await prisma.profilePreview.findMany({
-				where: { id: profile.id },
+				where: { profileId: profile.id },
 			});
 
-			const result = profilePreviews.map((pp) =>
-				ModelConverter.toIProfilePreview(pp),
-			);
+			const result: PreviewUpdateRespBody = {
+				previews: profilePreviews.map((pp) => pp.url),
+			};
 
 			return reply.send(result);
 		},
@@ -465,11 +474,7 @@ export default async function routes(fastify: FastifyTypebox) {
 							updatedAt: { gt: oneDayBefore },
 						},
 						include: {
-							storyMedias: {
-								include: {
-									upload: true,
-								},
-							},
+							upload: true,
 							_count: {
 								select: {
 									storyComments: true,
@@ -488,7 +493,14 @@ export default async function routes(fastify: FastifyTypebox) {
 										include: {
 											thumbMedia: true,
 											postMedias: {
-												include: { upload: true },
+												include: {
+													upload: true,
+													postMediaTags: {
+														include: {
+															user: true,
+														},
+													},
+												},
 											},
 											_count: {
 												select: {
@@ -801,7 +813,14 @@ export default async function routes(fastify: FastifyTypebox) {
 										include: {
 											thumbMedia: true,
 											postMedias: {
-												include: { upload: true },
+												include: {
+													upload: true,
+													postMediaTags: {
+														include: {
+															user: true,
+														},
+													},
+												},
 											},
 											_count: {
 												select: {
@@ -829,7 +848,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				return reply.sendError(APIErrors.ITEM_NOT_FOUND("Profile"));
 			}
 
-			const [videoCount, imageCount, subscriptionCount] =
+			const [videoCount, imageCount, subscriptionCount, review] =
 				await Promise.all([
 					prisma.upload.count({
 						where: {
@@ -874,6 +893,17 @@ export default async function routes(fastify: FastifyTypebox) {
 									},
 								},
 							],
+						},
+					}),
+					prisma.review.aggregate({
+						_avg: {
+							score: true,
+						},
+						_count: {
+							score: true,
+						},
+						where: {
+							creatorId: profile.id,
 						},
 					}),
 				]);
@@ -973,6 +1003,10 @@ export default async function routes(fastify: FastifyTypebox) {
 				videoCount,
 				subscriptionCount,
 				hasAccess,
+				review: {
+					total: review._count.score,
+					score: review._avg.score ?? 0,
+				},
 			};
 			return reply.send(result);
 		},

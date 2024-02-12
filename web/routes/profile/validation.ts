@@ -4,7 +4,7 @@ import { Equals, assert } from "tsafe";
 import {
 	AgeVerifyOndatoWebhookReqBody,
 	AvatarCreateReqBody,
-	PreviewCreateReqBody,
+	PreviewUpdateReqBody,
 	ProfileCreateReqBody,
 	ProfileFilterQuery,
 	ProfileLinkReqBody,
@@ -63,6 +63,8 @@ export const ProfileUpdateReqBodyValidator = Type.Object({
 	isFanReferralEnabled: Type.Optional(Type.Boolean()),
 	fanReferralShare: Type.Optional(Type.Number()),
 	marketingContentLink: Type.Optional(Type.String()),
+	isDisplayShop: Type.Optional(Type.Boolean()),
+	isDisplayReview: Type.Optional(Type.Boolean()),
 });
 
 assert<
@@ -111,12 +113,12 @@ assert<
 	Equals<Static<typeof ProfileFilterQueryValidator>, ProfileFilterQuery>
 >();
 
-export const PreviewCreateReqBodyValidator = Type.Object({
+export const PreviewUpdateReqBodyValidator = Type.Object({
 	previews: Type.Array(Type.String()),
 });
 
 assert<
-	Equals<Static<typeof PreviewCreateReqBodyValidator>, PreviewCreateReqBody>
+	Equals<Static<typeof PreviewUpdateReqBodyValidator>, PreviewUpdateReqBody>
 >();
 
 export const AvatarCreateReqBodyValidator = Type.Object({

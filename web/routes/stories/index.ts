@@ -60,11 +60,11 @@ export default async function routes(fastify: FastifyTypebox) {
 						},
 						storyComments: true,
 						storyLikes: true,
-						storyMedias: {
-							include: {
-								upload: true,
-							},
+						upload: true,
+						storyTags: {
+							include: { creator: true },
 						},
+						storyUrls: true,
 					},
 					skip: (page - 1) * size,
 					take: size,
@@ -116,11 +116,12 @@ export default async function routes(fastify: FastifyTypebox) {
 			const row = await prisma.story.findFirst({
 				where: { id: BigInt(storyId) },
 				include: {
-					storyMedias: {
-						include: {
-							upload: true,
-						},
+					upload: true,
+					storyTags: {
+						include: { creator: true },
 					},
+					storyUrls: true,
+
 					_count: {
 						select: { storyComments: true, storyLikes: true },
 					},
@@ -171,7 +172,7 @@ export default async function routes(fastify: FastifyTypebox) {
 		async (request, reply) => {
 			const session = request.session!;
 			const profile = (await session.getProfile(prisma))!;
-			const { mediaIds } = request.body;
+			const { mediaId } = request.body;
 
 			const storyCount = await prisma.story.count({
 				where: { profileId: profile.id },
@@ -186,22 +187,9 @@ export default async function routes(fastify: FastifyTypebox) {
 					id: snowflake.gen(),
 					profileId: profile.id,
 					isHighlight: false,
-					storyMedias: {
-						createMany: {
-							data: mediaIds.map((mediaId) => ({
-								id: snowflake.gen(),
-								uploadId: BigInt(mediaId),
-							})),
-						},
-					},
+					uploadId: BigInt(mediaId),
 				},
-				include: {
-					storyMedias: {
-						include: {
-							upload: true,
-						},
-					},
-				},
+				include: { upload: true },
 			});
 
 			await prisma.storyViewer.deleteMany({
@@ -348,11 +336,11 @@ export default async function routes(fastify: FastifyTypebox) {
 								updatedAt: { gt: oneDayBefore },
 							},
 							include: {
-								storyMedias: {
-									include: {
-										upload: true,
-									},
+								upload: true,
+								storyTags: {
+									include: { creator: true },
 								},
+								storyUrls: true,
 								_count: {
 									select: {
 										storyComments: true,
@@ -451,11 +439,11 @@ export default async function routes(fastify: FastifyTypebox) {
 						updatedAt: { gt: oneDayBefore },
 					},
 					include: {
-						storyMedias: {
-							include: {
-								upload: true,
-							},
+						upload: true,
+						storyTags: {
+							include: { creator: true },
 						},
+						storyUrls: true,
 						_count: {
 							select: {
 								storyComments: true,
@@ -541,11 +529,12 @@ export default async function routes(fastify: FastifyTypebox) {
 			const updatedStory = await prisma.story.findFirst({
 				where: { id: BigInt(storyId) },
 				include: {
-					storyMedias: {
-						include: {
-							upload: true,
-						},
+					upload: true,
+					storyTags: {
+						include: { creator: true },
 					},
+					storyUrls: true,
+
 					_count: {
 						select: { storyComments: true, storyLikes: true },
 					},
@@ -621,11 +610,11 @@ export default async function routes(fastify: FastifyTypebox) {
 			const updatedStory = await prisma.story.findFirst({
 				where: { id: BigInt(storyId) },
 				include: {
-					storyMedias: {
-						include: {
-							upload: true,
-						},
+					upload: true,
+					storyTags: {
+						include: { creator: true },
 					},
+					storyUrls: true,
 					_count: {
 						select: { storyComments: true, storyLikes: true },
 					},
@@ -687,11 +676,11 @@ export default async function routes(fastify: FastifyTypebox) {
 			const updatedStory = await prisma.story.findUnique({
 				where: { id: BigInt(storyId) },
 				include: {
-					storyMedias: {
-						include: {
-							upload: true,
-						},
+					upload: true,
+					storyTags: {
+						include: { creator: true },
 					},
+					storyUrls: true,
 					_count: {
 						select: {
 							storyComments: true,

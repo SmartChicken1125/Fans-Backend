@@ -1,10 +1,6 @@
 import { Static, Type } from "@sinclair/typebox";
 import { assert, Equals } from "tsafe";
-import {
-	CreateMeetingBody,
-	AcceptMeetingParams,
-	MeetingsQuery,
-} from "./schemas.js";
+import { CreateMeetingBody, MeetingsQuery } from "./schemas.js";
 
 export const CreateMeetingBodyValidator = Type.Object({
 	hostId: Type.String(),
@@ -14,14 +10,6 @@ export const CreateMeetingBodyValidator = Type.Object({
 	topics: Type.Optional(Type.String()),
 });
 assert<Equals<Static<typeof CreateMeetingBodyValidator>, CreateMeetingBody>>();
-
-export const AcceptMeetingParamsValidator = Type.Object({
-	meetingId: Type.String(),
-});
-
-assert<
-	Equals<Static<typeof AcceptMeetingParamsValidator>, AcceptMeetingParams>
->();
 
 export const MeetingQueryValidator = Type.Object({
 	hostId: Type.Optional(Type.String()),
@@ -35,8 +23,7 @@ export const MeetingQueryValidator = Type.Object({
 			Type.Literal("declined"),
 		]),
 	),
-	sort: Type.Optional(
-		Type.Union([Type.Literal("oldest"), Type.Literal("newest")]),
-	),
+	sort: Type.Optional(Type.String()),
+	withAttendees: Type.Optional(Type.Literal("1")),
 });
 assert<Equals<Static<typeof MeetingQueryValidator>, MeetingsQuery>>();

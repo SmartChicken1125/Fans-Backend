@@ -19,8 +19,12 @@ assert<
 	>
 >();
 
+export const MAX_MEETING_DURATION = 3 * 60;
+
 export const UpdadteMeetingDurationBodyValidator = Type.Object({
-	length: Type.Optional(Type.Integer({ maximum: 3 * 60, multipleOf: 5 })),
+	length: Type.Optional(
+		Type.Integer({ maximum: MAX_MEETING_DURATION, multipleOf: 5 }),
+	),
 	price: Type.Optional(Type.Number({ minimum: 0 })),
 	currency: Type.Optional(Type.String({ pattern: "^usd$" })),
 	isEnabled: Type.Optional(Type.Boolean()),

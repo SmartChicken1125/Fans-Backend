@@ -117,9 +117,7 @@ export default async function routes(fastify: FastifyTypebox) {
 											updatedAt: { gt: oneDayBefore },
 										},
 										include: {
-											storyMedias: {
-												include: { upload: true },
-											},
+											upload: true,
 											_count: {
 												select: {
 													storyComments: true,
@@ -141,7 +139,14 @@ export default async function routes(fastify: FastifyTypebox) {
 				include: {
 					thumbMedia: true,
 					postMedias: {
-						include: { upload: true },
+						include: {
+							upload: true,
+							postMediaTags: {
+								include: {
+									user: true,
+								},
+							},
+						},
 					},
 					_count: {
 						select: {
@@ -290,9 +295,7 @@ export default async function routes(fastify: FastifyTypebox) {
 											updatedAt: { gt: oneDayBefore },
 										},
 										include: {
-											storyMedias: {
-												include: { upload: true },
-											},
+											upload: true,
 											_count: {
 												select: {
 													storyComments: true,

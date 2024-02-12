@@ -14,6 +14,7 @@ import {
 import { Readable } from "stream";
 import sharp from "sharp";
 import { encode } from "blurhash";
+import { UploadStorageType } from "@prisma/client";
 
 type Multer = ReturnType<typeof multer>;
 
@@ -129,7 +130,10 @@ class MediaUploadService {
 		return presignedUrl;
 	}
 
-	async generateBlurhash(key: string): Promise<string | undefined> {
+	async generateBlurhash(
+		key: string,
+		storage: UploadStorageType,
+	): Promise<string | undefined> {
 		const imageBuffer = await this.getImageBuffer(key);
 		const rawImageData = await sharp(imageBuffer)
 			.raw()
@@ -169,11 +173,6 @@ class MediaUploadService {
 			stream.on("error", (err) => reject(err));
 			stream.on("end", () => resolve(Buffer.concat(chunks)));
 		});
-	}
-
-	private async asString(response: GetObjectCommandOutput) {
-		const buffer = await this.asBuffer(response);
-		return buffer.toString();
 	}
 }
 

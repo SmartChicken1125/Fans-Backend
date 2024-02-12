@@ -1,7 +1,22 @@
 import { IProfile, IStory } from "../../CommonAPISchemas.js";
 
+export type CreateStoryUrl = {
+	url: string;
+	pointX: number;
+	pointY: number;
+};
+
+export type CreateStoryTag = {
+	creatorId: string;
+	color: string;
+	pointX: number;
+	pointY: number;
+};
+
 export interface StoryCreateReqBody {
-	mediaIds: string[];
+	mediaId: string;
+	storyUrls: CreateStoryUrl[];
+	storyTags: CreateStoryTag[];
 }
 
 export type StoryRespBody = IStory;

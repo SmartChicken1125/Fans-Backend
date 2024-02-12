@@ -1,15 +1,19 @@
+import { MessageReportFlag } from "@prisma/client";
 import { Static, Type } from "@sinclair/typebox";
 import { Equals, assert } from "tsafe";
+import { gifPayloadSchema } from "../../../common/service/InboxManagerService.js";
 import {
+	ChannelMediaPageQuery,
+	ChatAutomatedMessageWelcomeReqBody,
 	ChatConversationMessagesPostReqBody,
 	ChatConversationMessagesQuery,
+	ChatDeleteMessageIdParams,
 	ChatFansListReqParams,
 	ChatIdParams,
-	ChatDeleteMessageIdParams,
+	ChatNoteReqBody,
 	ChatPaginatedQuery,
 	ChatUserIdParams,
-	ChatNoteReqBody,
-	ChatAutomatedMessageWelcomeReqBody,
+	CreateMessageReportReqBody,
 } from "./schemas.js";
 
 export const ChatPaginatedQueryValidator = Type.Object({
@@ -80,6 +84,7 @@ export const ChatConversationMessagesPostReqBodyValidator = Type.Object({
 	content: Type.String({
 		maxLength: 1000,
 	}),
+	gif: Type.Optional(gifPayloadSchema),
 	uploadIds: Type.Optional(
 		Type.Array(Type.String({ format: "snowflake" }), {
 			maxItems: 4,
@@ -125,4 +130,27 @@ assert<
 		Static<typeof ChatAutomatedMessageWelcomeReqBodyValidator>,
 		ChatAutomatedMessageWelcomeReqBody
 	>
+>();
+
+export const CreateMessageReportReqBodyValidator = Type.Object({
+	messageId: Type.Required(Type.String()),
+	reportFlag: Type.Enum(MessageReportFlag),
+	reason: Type.Optional(Type.String()),
+});
+
+assert<
+	Equals<
+		Static<typeof CreateMessageReportReqBodyValidator>,
+		CreateMessageReportReqBody
+	>
+>();
+
+export const ChannelMediaPageQueryValidator = Type.Object({
+	page: Type.Number(),
+	size: Type.Number(),
+	type: Type.Optional(Type.String()),
+});
+
+assert<
+	Equals<Static<typeof ChannelMediaPageQueryValidator>, ChannelMediaPageQuery>
 >();

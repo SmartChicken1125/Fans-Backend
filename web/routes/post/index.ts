@@ -59,6 +59,7 @@ import {
 	SaveFormReqBodyValidator,
 	SendInvitationReqBodyValidator,
 } from "./validation.js";
+import XPService from "../../../common/service/XPService.js";
 
 export default async function routes(fastify: FastifyTypebox) {
 	const { container } = fastify;
@@ -70,6 +71,7 @@ export default async function routes(fastify: FastifyTypebox) {
 	const mediaUpload = await container.resolve(MediaUploadService);
 	const notification = await container.resolve(NotificationService);
 	const bullMQService = await container.resolve(BullMQService);
+	const xpService = await container.resolve(XPService);
 
 	// pagination for loading post
 	fastify.get<{ Querystring: PostFilterQuery; Reply: PostsRespBody }>(
@@ -108,7 +110,7 @@ export default async function routes(fastify: FastifyTypebox) {
 					type: type ?? undefined,
 					profileId: profile.id,
 					schedule: schedule ? { isNot: null } : undefined,
-					isPosted: !schedule,
+					isPosted: schedule ? undefined : true,
 				},
 			});
 			if (isOutOfRange(page, size, total)) {
@@ -130,11 +132,8 @@ export default async function routes(fastify: FastifyTypebox) {
 					],
 					type: type ?? undefined,
 					profileId: profile.id,
-					NOT: {
-						schedule: schedule ? null : undefined,
-						isPosted: !schedule ? false : undefined,
-					},
-					isPosted: true,
+					schedule: schedule ? { isNot: null } : undefined,
+					isPosted: schedule ? undefined : true,
 				},
 				include: {
 					profile: true,
@@ -143,7 +142,14 @@ export default async function routes(fastify: FastifyTypebox) {
 					},
 					thumbMedia: true,
 					postMedias: {
-						include: { upload: true },
+						include: {
+							upload: true,
+							postMediaTags: {
+								include: {
+									user: true,
+								},
+							},
+						},
 					},
 					schedule: true,
 				},
@@ -164,6 +170,9 @@ export default async function routes(fastify: FastifyTypebox) {
 						? ModelConverter.toIPaidPost(row.paidPost)
 						: undefined,
 					profile: ModelConverter.toIProfile(row.profile),
+					schedule: row.schedule
+						? ModelConverter.toISchedule(row.schedule)
+						: undefined,
 				})),
 				page,
 				size,
@@ -239,7 +248,14 @@ export default async function routes(fastify: FastifyTypebox) {
 					},
 					thumbMedia: true,
 					postMedias: {
-						include: { upload: true },
+						include: {
+							upload: true,
+							postMediaTags: {
+								include: {
+									user: true,
+								},
+							},
+						},
 					},
 				},
 				take: size,
@@ -314,6 +330,7 @@ export default async function routes(fastify: FastifyTypebox) {
 					},
 					categories: {
 						include: { category: true },
+						orderBy: { category: { order: "asc" } },
 					},
 					fundraiser: {
 						include: { thumbMedia: true },
@@ -348,7 +365,14 @@ export default async function routes(fastify: FastifyTypebox) {
 					},
 					thumbMedia: true,
 					postMedias: {
-						include: { upload: true },
+						include: {
+							upload: true,
+							postMediaTags: {
+								include: {
+									user: true,
+								},
+							},
+						},
 					},
 					profile: {
 						include: {
@@ -361,9 +385,7 @@ export default async function routes(fastify: FastifyTypebox) {
 									updatedAt: { gt: oneDayBefore },
 								},
 								include: {
-									storyMedias: {
-										include: { upload: true },
-									},
+									upload: true,
 									_count: {
 										select: {
 											storyComments: true,
@@ -537,20 +559,6 @@ export default async function routes(fastify: FastifyTypebox) {
 						],
 					},
 				});
-				await Promise.all(
-					uploads
-						.filter((u) => u.type === "Image" || u.type === "Video")
-						.map(async (u) => {
-							const blurhash =
-								u.type === "Image"
-									? await mediaUpload.generateBlurhash(u.url)
-									: "00RV*9";
-							await prisma.upload.update({
-								where: { id: u.id },
-								data: { blurhash },
-							});
-						}),
-				);
 			}
 
 			// data.mediaIds
@@ -589,11 +597,18 @@ export default async function routes(fastify: FastifyTypebox) {
 
 			// data.roles
 			if (
-				data.roles &&
-				data.roles.length > 0 &&
+				((data.roles && data.roles.length > 0) ||
+					(data.paidPost?.roles && data.paidPost.roles.length > 0)) &&
 				(await prisma.role.count({
 					where: {
-						id: { in: data.roles.map((r) => BigInt(r)) },
+						id: {
+							in: [
+								...(data.roles?.map((r) => BigInt(r)) || []),
+								...(data.paidPost?.roles?.map((r) =>
+									BigInt(r),
+								) || []),
+							],
+						},
 						profileId: { not: profile.id },
 					},
 				}))
@@ -603,11 +618,18 @@ export default async function routes(fastify: FastifyTypebox) {
 
 			// data.tiers
 			if (
-				data.tiers &&
-				data.tiers.length > 0 &&
+				((data.tiers && data.tiers.length > 0) ||
+					(data.paidPost?.tiers && data.paidPost.tiers.length > 0)) &&
 				(await prisma.tier.count({
 					where: {
-						id: { in: data.tiers.map((t) => BigInt(t)) },
+						id: {
+							in: [
+								...(data.tiers?.map((t) => BigInt(t)) || []),
+								...(data.paidPost?.tiers?.map((t) =>
+									BigInt(t),
+								) || []),
+							],
+						},
 						profileId: { not: profile.id },
 					},
 				}))
@@ -653,20 +675,29 @@ export default async function routes(fastify: FastifyTypebox) {
 					isPosted: isPosted,
 					postMedias: data.postMedias
 						? {
-								create: data.postMedias.map((item) => ({
-									id: snowflake.gen(),
-									uploadId: BigInt(item.postMediaId),
-									postMediaTags: {
-										createMany: {
-											data: item.tags.map((tag) => ({
-												id: snowflake.gen(),
-												userId: BigInt(tag.userId),
-												pointX: tag.pointX,
-												pointY: tag.pointY,
-											})),
-										},
-									},
-								})),
+								createMany: {
+									data: data.postMedias.map((item) => ({
+										id: snowflake.gen(),
+										uploadId: BigInt(item.postMediaId),
+										postMediaTags:
+											item.tags && item.tags.length > 0
+												? {
+														createMany: {
+															data: item.tags.map(
+																(tag) => ({
+																	id: snowflake.gen(),
+																	userId: BigInt(
+																		tag.userId,
+																	),
+																	pointX: tag.pointX,
+																	pointY: tag.pointY,
+																}),
+															),
+														},
+												  }
+												: undefined,
+									})),
+								},
 						  }
 						: undefined,
 					postForms: data.formIds
@@ -803,7 +834,10 @@ export default async function routes(fastify: FastifyTypebox) {
 						: undefined,
 				},
 				include: {
-					categories: { include: { category: true } },
+					categories: {
+						include: { category: true },
+						orderBy: { category: { order: "asc" } },
+					},
 					fundraiser: { include: { thumbMedia: true } },
 					giveaway: {
 						include: {
@@ -820,7 +854,14 @@ export default async function routes(fastify: FastifyTypebox) {
 					profile: true,
 					thumbMedia: true,
 					postMedias: {
-						include: { upload: true, postMediaTags: true },
+						include: {
+							upload: true,
+							postMediaTags: {
+								include: {
+									user: true,
+								},
+							},
+						},
 					},
 					poll: {
 						include: {
@@ -992,13 +1033,18 @@ export default async function routes(fastify: FastifyTypebox) {
 				include: {
 					roles: true,
 					categories: true,
+					users: true,
 					schedule: true,
 				},
 			});
 			if (!post) return reply.sendError(APIErrors.ITEM_NOT_FOUND("Post"));
 
 			let newJobId = undefined;
-			if (data.startDate && post.schedule?.jobId) {
+			if (
+				data.schedule &&
+				data.schedule.startDate &&
+				post.schedule?.jobId
+			) {
 				const queue = bullMQService.createQueue("scheduledPost");
 				const job = await queue.getJob(post.schedule.jobId);
 				if (job) {
@@ -1007,7 +1053,7 @@ export default async function routes(fastify: FastifyTypebox) {
 						await job.remove();
 
 						const delay =
-							Number(new Date(data.startDate)) -
+							Number(new Date(data.schedule.startDate)) -
 							Number(new Date());
 						const newJob = await queue.add(
 							"scheduledPost",
@@ -1044,22 +1090,30 @@ export default async function routes(fastify: FastifyTypebox) {
 				);
 			}
 
+			const userIds = post.users.map((c) => c.userId.toString());
+			let usersToAdd: string[] = [];
+			let usersToRemove: string[] = [];
+			if (data.users && data.users.length > 0) {
+				usersToAdd = data.users.filter((c) => !userIds.includes(c));
+				usersToRemove = userIds.filter((c) => !data.users?.includes(c));
+			}
+
 			await prisma.post.update({
 				where: { id: BigInt(id) },
 				data: {
 					title: data.title ?? undefined,
 					type: data.type ?? undefined,
 					caption: data.caption ?? undefined,
-					thumb: data.thumb ?? undefined,
-					resource: data.resource ?? undefined,
+					thumb: data.thumbId ?? undefined,
+					// resource: data.resource ?? undefined,
 					advanced:
 						(data?.advanced as PrismaJson<PostAdvanced>) ??
 						Prisma.JsonNull,
 					location: data.location,
 					schedule: {
 						update: {
-							startDate: data.startDate ?? undefined,
-							endDate: data.endDate ?? undefined,
+							startDate: data.schedule?.startDate ?? undefined,
+							endDate: data.schedule?.endDate ?? undefined,
 							jobId: newJobId ?? undefined,
 						},
 					},
@@ -1093,6 +1147,23 @@ export default async function routes(fastify: FastifyTypebox) {
 										data: categoriesToAdd.map((r) => ({
 											id: snowflake.gen(),
 											categoryId: BigInt(r),
+										})),
+								  }
+								: undefined,
+					},
+					users: {
+						deleteMany:
+							usersToRemove.length > 0
+								? usersToRemove.map((r) => ({
+										userId: BigInt(r),
+								  }))
+								: undefined,
+						createMany:
+							usersToAdd.length > 0
+								? {
+										data: usersToAdd.map((r) => ({
+											id: snowflake.gen(),
+											userId: BigInt(r),
 										})),
 								  }
 								: undefined,
@@ -1257,7 +1328,14 @@ export default async function routes(fastify: FastifyTypebox) {
 					},
 					thumbMedia: true,
 					postMedias: {
-						include: { upload: true },
+						include: {
+							upload: true,
+							postMediaTags: {
+								include: {
+									user: true,
+								},
+							},
+						},
 					},
 				},
 				orderBy: [
@@ -1315,13 +1393,6 @@ export default async function routes(fastify: FastifyTypebox) {
 			const profile = await session.getProfile(prisma);
 			const user = await prisma.user.findFirst({
 				where: { id: BigInt(session.userId) },
-				include: {
-					activeUserList: {
-						include: {
-							creators: true,
-						},
-					},
-				},
 			});
 			const paymentSubscriptions =
 				await prisma.paymentSubscription.findMany({
@@ -1340,21 +1411,31 @@ export default async function routes(fastify: FastifyTypebox) {
 					},
 				});
 
-			const userList = userListId
-				? await prisma.userList.findFirst({
+			const userLists = userListId
+				? await prisma.userList.findMany({
 						where: {
 							id: BigInt(userListId),
 							userId: BigInt(session.userId),
 						},
-						include: { creators: true },
 				  })
-				: undefined;
+				: await prisma.userList.findMany({
+						where: {
+							userId: BigInt(session.userId),
+							enabled: true,
+						},
+				  });
 
-			const activeCreatorIds = userList
-				? userList.creators.map((c) => c.profileId)
-				: user?.activeUserList
-				? user.activeUserList.creators.map((c) => c.profileId)
-				: undefined;
+			const activeCreatorIds =
+				userLists.length > 0
+					? await prisma.userListUser.findMany({
+							where: {
+								userlistId: {
+									in: userLists.map((ul) => ul.id),
+								},
+							},
+							select: { profileId: true },
+					  })
+					: undefined;
 
 			const subscribedCreatorIds = paymentSubscriptions.map(
 				(ps) => ps.creatorId,
@@ -1364,24 +1445,51 @@ export default async function routes(fastify: FastifyTypebox) {
 				select: { postId: true },
 				where: { userId: BigInt(session.userId) },
 			});
-			const total = await prisma.post.count({
-				where: {
-					profileId: {
-						in: activeCreatorIds
-							? activeCreatorIds
-							: subscribedCreatorIds,
+
+			const whereCondition = {
+				OR: [
+					{
+						roles: {
+							none: {},
+						},
 					},
-					id: { notIn: hiddenPosts.map((p) => p.postId) },
-					isArchived: false,
-					categories: categoryId
-						? {
-								some: {
-									categoryId: BigInt(categoryId),
+					{
+						roles: {
+							some: {
+								role: {
+									userLevels: {
+										some: {
+											userId: BigInt(session.userId),
+										},
+									},
 								},
-						  }
-						: undefined,
-					isPosted: true,
+							},
+						},
+					},
+				],
+				profileId: {
+					in: activeCreatorIds
+						? activeCreatorIds
+								.map((cid) => cid.profileId)
+								.filter((cid) =>
+									subscribedCreatorIds.includes(cid),
+								)
+						: subscribedCreatorIds,
 				},
+				id: { notIn: hiddenPosts.map((p) => p.postId) },
+				isArchived: false,
+				categories: categoryId
+					? {
+							some: {
+								categoryId: BigInt(categoryId),
+							},
+					  }
+					: undefined,
+				isPosted: true,
+			};
+
+			const total = await prisma.post.count({
+				where: whereCondition,
 				orderBy:
 					sort === "Latest"
 						? { id: "desc" }
@@ -1409,30 +1517,17 @@ export default async function routes(fastify: FastifyTypebox) {
 
 			const [rows, metadata] = await Promise.all([
 				prisma.post.findMany({
-					where: {
-						profileId: {
-							in: activeCreatorIds
-								? activeCreatorIds.filter((id) =>
-										subscribedCreatorIds.includes(id),
-								  )
-								: subscribedCreatorIds,
-						},
-						id: { notIn: hiddenPosts.map((p) => p.postId) },
-						isArchived: false,
-						categories: categoryId
-							? {
-									some: {
-										categoryId: BigInt(categoryId),
-									},
-							  }
-							: undefined,
-						isPosted: true,
-					},
+					where: whereCondition,
 					include: {
 						thumbMedia: true,
 						postMedias: {
 							include: {
 								upload: true,
+								postMediaTags: {
+									include: {
+										user: true,
+									},
+								},
 							},
 						},
 						paidPost: {
@@ -1478,9 +1573,7 @@ export default async function routes(fastify: FastifyTypebox) {
 										updatedAt: { gt: oneDayBefore },
 									},
 									include: {
-										storyMedias: {
-											include: { upload: true },
-										},
+										upload: true,
 										_count: {
 											select: {
 												storyComments: true,
@@ -1493,9 +1586,8 @@ export default async function routes(fastify: FastifyTypebox) {
 							},
 						},
 						categories: {
-							include: {
-								category: true,
-							},
+							include: { category: true },
+							orderBy: { category: { order: "asc" } },
 						},
 						_count: {
 							select: {
@@ -1518,22 +1610,16 @@ export default async function routes(fastify: FastifyTypebox) {
 					skip: (page - 1) * size,
 				}),
 				prisma.post.findMany({
-					where: {
-						profileId: { in: subscribedCreatorIds },
-						id: { notIn: hiddenPosts.map((p) => p.postId) },
-						categories: categoryId
-							? {
-									some: {
-										categoryId: BigInt(categoryId),
-									},
-							  }
-							: undefined,
-						isPosted: true,
-					},
+					where: whereCondition,
 					include: {
 						postMedias: {
 							include: {
 								upload: true,
+								postMediaTags: {
+									include: {
+										user: true,
+									},
+								},
 							},
 						},
 						_count: {
@@ -1676,6 +1762,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				page = 1,
 				size = DEFAULT_PAGE_SIZE,
 				categoryId,
+				schedule = false,
 			} = request.query;
 			const { id: userId } = request.params;
 			const user = await prisma.user.findFirst({
@@ -1693,36 +1780,75 @@ export default async function routes(fastify: FastifyTypebox) {
 
 			const session = request.session;
 			if (session) {
-				const profile = await session.getProfile(prisma);
+				const requestingUser =
+					(await session.getUserWithProfile(prisma))!;
+				const profile = requestingUser.profile;
+
+				const userLevel = await prisma.userLevel.findFirst({
+					where: {
+						creatorId: BigInt(user.profile.id),
+						userId: BigInt(requestingUser.id),
+					},
+				});
+
 				const hiddenPosts = await prisma.hiddenPost.findMany({
 					select: { postId: true },
 					where: { userId: BigInt(session.userId) },
 				});
 
+				const whereCondition = {
+					OR: [
+						{
+							roles: {
+								none: {},
+							},
+						},
+						{
+							roles:
+								requestingUser.id != user.id
+									? {
+											some: {
+												role: {
+													id: BigInt(
+														userLevel?.roleId || 0,
+													),
+												},
+											},
+									  }
+									: undefined,
+						},
+					],
+					profileId: user.profile.id,
+					id: { notIn: hiddenPosts.map((p) => p.postId) },
+					isArchived: false,
+					categories: categoryId
+						? {
+								some: {
+									categoryId: BigInt(categoryId),
+								},
+						  }
+						: undefined,
+					schedule: schedule ? { isNot: null } : undefined,
+					isPosted: schedule ? undefined : true,
+				};
+
 				const total = await prisma.post.count({
-					where: {
-						profileId: user.profile.id,
-						id: { notIn: hiddenPosts.map((p) => p.postId) },
-						isArchived: false,
-						categories: categoryId
-							? {
-									some: {
-										categoryId: BigInt(categoryId),
-									},
-							  }
-							: undefined,
-						isPosted: true,
-					},
+					where: whereCondition,
 					orderBy:
 						sort === "Latest"
-							? [{ isPinned: "desc" }, { id: "desc" }]
+							? [
+									{ isPosted: "asc" },
+									{ isPinned: "desc" },
+									{ id: "desc" },
+							  ]
 							: sort === "Popular"
 							? [
+									{ isPosted: "asc" },
 									{ isPinned: "desc" },
 									{ comments: { _count: "desc" } },
 									{ postLikes: { _count: "desc" } },
 							  ]
-							: [{ isPinned: "desc" }],
+							: [{ isPosted: "asc" }, { isPinned: "desc" }],
 				});
 
 				if (isOutOfRange(page, size, total)) {
@@ -1758,24 +1884,17 @@ export default async function routes(fastify: FastifyTypebox) {
 
 				const [rows, metadata] = await Promise.all([
 					prisma.post.findMany({
-						where: {
-							profileId: user.profile.id,
-							id: { notIn: hiddenPosts.map((p) => p.postId) },
-							isArchived: false,
-							categories: categoryId
-								? {
-										some: {
-											categoryId: BigInt(categoryId),
-										},
-								  }
-								: undefined,
-							isPosted: true,
-						},
+						where: whereCondition,
 						include: {
 							thumbMedia: true,
 							postMedias: {
 								include: {
 									upload: true,
+									postMediaTags: {
+										include: {
+											user: true,
+										},
+									},
 								},
 							},
 							profile: {
@@ -1789,9 +1908,7 @@ export default async function routes(fastify: FastifyTypebox) {
 											updatedAt: { gt: oneDayBefore },
 										},
 										include: {
-											storyMedias: {
-												include: { upload: true },
-											},
+											upload: true,
 											_count: {
 												select: {
 													storyComments: true,
@@ -1808,6 +1925,7 @@ export default async function routes(fastify: FastifyTypebox) {
 							},
 							categories: {
 								include: { category: true },
+								orderBy: { category: { order: "asc" } },
 							},
 							taggedPeoples: {
 								include: { user: true },
@@ -1841,6 +1959,7 @@ export default async function routes(fastify: FastifyTypebox) {
 							},
 							tiers: true,
 							users: true,
+							schedule: true,
 							_count: {
 								select: {
 									bookmarks: true,
@@ -1851,30 +1970,24 @@ export default async function routes(fastify: FastifyTypebox) {
 						},
 						orderBy:
 							sort === "Latest"
-								? [{ isPinned: "desc" }, { id: "desc" }]
+								? [
+										{ isPosted: "asc" },
+										{ isPinned: "desc" },
+										{ id: "desc" },
+								  ]
 								: sort === "Popular"
 								? [
+										{ isPosted: "asc" },
 										{ isPinned: "desc" },
 										{ comments: { _count: "desc" } },
 										{ postLikes: { _count: "desc" } },
 								  ]
-								: [{ isPinned: "desc" }],
+								: [{ isPosted: "asc" }, { isPinned: "desc" }],
 						take: size,
 						skip: (page - 1) * size,
 					}),
 					prisma.post.findMany({
-						where: {
-							profileId: user.profile.id,
-							id: { notIn: hiddenPosts.map((p) => p.postId) },
-							categories: categoryId
-								? {
-										some: {
-											categoryId: BigInt(categoryId),
-										},
-								  }
-								: undefined,
-							isPosted: true,
-						},
+						where: whereCondition,
 						include: {
 							_count: {
 								select: {
@@ -1916,19 +2029,31 @@ export default async function routes(fastify: FastifyTypebox) {
 							},
 							thumbMedia: true,
 							postMedias: {
-								include: { upload: true },
+								include: {
+									upload: true,
+									postMediaTags: {
+										include: {
+											user: true,
+										},
+									},
+								},
 							},
 						},
 						orderBy:
 							sort === "Latest"
-								? [{ isPinned: "desc" }, { id: "desc" }]
+								? [
+										{ isPosted: "asc" },
+										{ isPinned: "desc" },
+										{ id: "desc" },
+								  ]
 								: sort === "Popular"
 								? [
+										{ isPosted: "asc" },
 										{ isPinned: "desc" },
 										{ comments: { _count: "desc" } },
 										{ postLikes: { _count: "desc" } },
 								  ]
-								: [{ isPinned: "desc" }],
+								: [{ isPosted: "asc" }, { isPinned: "desc" }],
 						take: size,
 						skip: (page - 1) * size,
 					}),
@@ -1998,6 +2123,9 @@ export default async function routes(fastify: FastifyTypebox) {
 						  }
 						: undefined,
 					roles: row.roles.map((r) => ModelConverter.toIRole(r.role)),
+					schedule: row.schedule
+						? ModelConverter.toISchedule(row.schedule)
+						: undefined,
 				}));
 
 				const result: PostsRespBody = {
@@ -2532,7 +2660,14 @@ export default async function routes(fastify: FastifyTypebox) {
 				include: {
 					thumbMedia: true,
 					postMedias: {
-						include: { upload: true },
+						include: {
+							upload: true,
+							postMediaTags: {
+								include: {
+									user: true,
+								},
+							},
+						},
 					},
 					_count: {
 						select: { postLikes: true },
@@ -2554,6 +2689,8 @@ export default async function routes(fastify: FastifyTypebox) {
 				where: { id: updatedPost.profileId },
 				data: { likeCount: likeCountOfProfile },
 			});
+
+			await xpService.addXPLog("Like", 0, user.id, updatedPost.profileId);
 
 			if (post.profile.notificationsSettings?.likeCreatorInApp) {
 				notification.sendPostInteractionNotification(
@@ -2625,7 +2762,14 @@ export default async function routes(fastify: FastifyTypebox) {
 				include: {
 					thumbMedia: true,
 					postMedias: {
-						include: { upload: true },
+						include: {
+							upload: true,
+							postMediaTags: {
+								include: {
+									user: true,
+								},
+							},
+						},
 					},
 					_count: {
 						select: {
@@ -2704,6 +2848,11 @@ export default async function routes(fastify: FastifyTypebox) {
 					postMedias: {
 						include: {
 							upload: true,
+							postMediaTags: {
+								include: {
+									user: true,
+								},
+							},
 						},
 					},
 				},
@@ -2757,7 +2906,14 @@ export default async function routes(fastify: FastifyTypebox) {
 				include: {
 					thumbMedia: true,
 					postMedias: {
-						include: { upload: true },
+						include: {
+							upload: true,
+							postMediaTags: {
+								include: {
+									user: true,
+								},
+							},
+						},
 					},
 				},
 			});
@@ -2810,7 +2966,14 @@ export default async function routes(fastify: FastifyTypebox) {
 				include: {
 					thumbMedia: true,
 					postMedias: {
-						include: { upload: true },
+						include: {
+							upload: true,
+							postMediaTags: {
+								include: {
+									user: true,
+								},
+							},
+						},
 					},
 				},
 			});

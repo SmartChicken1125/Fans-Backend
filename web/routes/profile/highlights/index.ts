@@ -63,11 +63,7 @@ export default async function routes(fastify: FastifyTypebox) {
 							include: {
 								story: {
 									include: {
-										storyMedias: {
-											include: {
-												upload: true,
-											},
-										},
+										upload: true,
 										_count: {
 											select: {
 												storyComments: true,
@@ -135,11 +131,7 @@ export default async function routes(fastify: FastifyTypebox) {
 						include: {
 							story: {
 								include: {
-									storyMedias: {
-										include: {
-											upload: true,
-										},
-									},
+									upload: true,
 									_count: {
 										select: {
 											storyComments: true,
@@ -230,11 +222,7 @@ export default async function routes(fastify: FastifyTypebox) {
 						include: {
 							story: {
 								include: {
-									storyMedias: {
-										include: {
-											upload: true,
-										},
-									},
+									upload: true,
 									_count: {
 										select: {
 											storyComments: true,

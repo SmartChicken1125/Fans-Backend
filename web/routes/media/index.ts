@@ -80,7 +80,7 @@ export default async function routes(fastify: FastifyTypebox) {
 			const { type } = request.params;
 			if (!type) {
 				return reply.sendError(APIErrors.ITEM_MISSING("Type"));
-			} else if (type !== "Image" && type !== "Audio") {
+			} else if (type !== UploadType.Image && type !== UploadType.Audio) {
 				return reply.sendError(
 					APIErrors.INVALID_REQUEST(
 						"Only Image and Audio uploads are supported using this method.",
@@ -152,13 +152,15 @@ export default async function routes(fastify: FastifyTypebox) {
 			const result: MediasRespBody = {
 				medias: await Promise.all(
 					medias.map(async (m) => {
-						const url = await resolveAuthenticatedMediaURL(
-							m,
-							cloudflareStream,
-							mediaUpload,
-						);
+						const { url, thumbnail } =
+							await resolveAuthenticatedMediaURL(
+								m,
+								cloudflareStream,
+								mediaUpload,
+							);
 						const media = ModelConverter.toIMedia(m);
 						media.url = url;
+						media.thumbnail = thumbnail;
 						return media;
 					}),
 				),
@@ -185,13 +187,12 @@ export default async function routes(fastify: FastifyTypebox) {
 		},
 		async (request, reply) => {
 			const { page = 1, size = DEFAULT_PAGE_SIZE, type } = request.query;
-
 			const session = request.session!;
 			const profile = (await session.getProfile(prisma))!;
 			const [imageTotal, videoTotal] = await Promise.all([
 				prisma.upload.count({
 					where: {
-						type: "Image",
+						type: UploadType.Image,
 						usage: UploadUsageType.POST,
 						postMedias: {
 							some: {
@@ -206,7 +207,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				}),
 				prisma.upload.count({
 					where: {
-						type: "Video",
+						type: UploadType.Video,
 						usage: UploadUsageType.POST,
 						postMedias: {
 							some: {
@@ -222,9 +223,9 @@ export default async function routes(fastify: FastifyTypebox) {
 			]);
 
 			const total =
-				type === "Image"
+				type === UploadType.Image
 					? imageTotal
-					: type === "Video"
+					: type === UploadType.Video
 					? videoTotal
 					: imageTotal + videoTotal;
 
@@ -234,7 +235,7 @@ export default async function routes(fastify: FastifyTypebox) {
 
 			const medias = await prisma.upload.findMany({
 				where: {
-					type: type ?? { in: ["Video", "Image"] },
+					type: type ?? { in: [UploadType.Video, UploadType.Image] },
 					usage: UploadUsageType.POST,
 					postMedias: {
 						some: {
@@ -253,14 +254,16 @@ export default async function routes(fastify: FastifyTypebox) {
 			const result: MediasRespBody = {
 				medias: await Promise.all(
 					medias.map(async (m) => {
-						const url = await resolveAuthenticatedMediaURL(
-							m,
-							cloudflareStream,
-							mediaUpload,
-						);
+						const { url, thumbnail } =
+							await resolveAuthenticatedMediaURL(
+								m,
+								cloudflareStream,
+								mediaUpload,
+							);
 
 						const media = ModelConverter.toIMedia(m);
 						media.url = url;
+						media.thumbnail = thumbnail;
 						return media;
 					}),
 				),
@@ -291,7 +294,6 @@ export default async function routes(fastify: FastifyTypebox) {
 		async (request, reply) => {
 			const { id: userId } = request.params;
 			const { page = 1, size = DEFAULT_PAGE_SIZE, type } = request.query;
-
 			const profile = await prisma.profile.findFirst({
 				where: { userId: BigInt(userId) },
 			});
@@ -299,51 +301,108 @@ export default async function routes(fastify: FastifyTypebox) {
 				return reply.sendError(APIErrors.ITEM_NOT_FOUND("Profile"));
 			}
 
-			const [imageTotal, videoTotal] = await Promise.all([
-				prisma.upload.count({
-					where: {
-						type: "Image",
-						usage: UploadUsageType.POST,
-						postMedias: {
-							some: {
-								post: {
-									profileId: profile.id,
-									isArchived: false,
-									isPosted: true,
-								},
-							},
-						},
-					},
-				}),
-				prisma.upload.count({
-					where: {
-						type: "Video",
-						usage: UploadUsageType.POST,
-						postMedias: {
-							some: {
-								post: {
-									profileId: profile.id,
-									isArchived: false,
-									isPosted: true,
-								},
-							},
-						},
-					},
-				}),
-			]);
-
-			const total =
-				type === "Image"
-					? imageTotal
-					: type === "Video"
-					? videoTotal
-					: imageTotal + videoTotal;
-
-			if (isOutOfRange(page, size, total)) {
-				return reply.sendError(APIErrors.OUT_OF_RANGE);
-			}
 			const session = request.session!;
 			if (session) {
+				const paidPostTransactions =
+					await prisma.paidPostTransaction.findMany({
+						where: {
+							userId: BigInt(session.userId),
+							creatorId: profile.id,
+							status: { in: [TransactionStatus.Successful] },
+						},
+						include: { paidPost: true },
+					});
+
+				const paidOutPostIds = paidPostTransactions.map(
+					(ppt) => ppt.paidPost.postId,
+				);
+
+				const requestingUser = (await session.getUser(prisma))!;
+
+				const userLevel = await prisma.userLevel.findFirst({
+					where: {
+						creatorId: BigInt(profile.id),
+						userId: BigInt(requestingUser.id),
+					},
+				});
+
+				const postCondition = {
+					profileId: profile.id,
+					isArchived: false,
+					isPosted: true,
+					AND: [
+						{
+							OR: [
+								{ isPaidPost: false },
+								{
+									isPaidPost: true,
+									id: { in: paidOutPostIds },
+								},
+							],
+						},
+						{
+							OR: [
+								{
+									roles: {
+										none: {},
+									},
+								},
+								{
+									roles:
+										requestingUser.id != BigInt(userId)
+											? {
+													some: {
+														role: {
+															id: BigInt(
+																userLevel?.roleId ||
+																	0,
+															),
+														},
+													},
+											  }
+											: undefined,
+								},
+							],
+						},
+					],
+				};
+
+				const [imageTotal, videoTotal] = await Promise.all([
+					prisma.upload.count({
+						where: {
+							type: UploadType.Image,
+							usage: UploadUsageType.POST,
+							postMedias: {
+								some: {
+									post: postCondition,
+								},
+							},
+						},
+					}),
+					prisma.upload.count({
+						where: {
+							type: UploadType.Video,
+							usage: UploadUsageType.POST,
+							postMedias: {
+								some: {
+									post: postCondition,
+								},
+							},
+						},
+					}),
+				]);
+
+				const total =
+					type === UploadType.Image
+						? imageTotal
+						: type === UploadType.Video
+						? videoTotal
+						: imageTotal + videoTotal;
+
+				if (isOutOfRange(page, size, total)) {
+					return reply.sendError(APIErrors.OUT_OF_RANGE);
+				}
+
 				const hasAccess = session
 					? await checkAccess(
 							prisma,
@@ -365,25 +424,16 @@ export default async function routes(fastify: FastifyTypebox) {
 					});
 				}
 
-				const [paidPostTransactions, medias] = await Promise.all([
-					prisma.paidPostTransaction.findMany({
-						where: {
-							userId: BigInt(session.userId),
-							status: { in: [TransactionStatus.Successful] },
-						},
-						include: { paidPost: true },
-					}),
+				const [medias] = await Promise.all([
 					prisma.upload.findMany({
 						where: {
-							type: type ?? { in: ["Video", "Image"] },
+							type: type ?? {
+								in: [UploadType.Video, UploadType.Image],
+							},
 							usage: UploadUsageType.POST,
 							postMedias: {
 								some: {
-									post: {
-										profileId: profile.id,
-										isArchived: false,
-										isPosted: true,
-									},
+									post: postCondition,
 								},
 							},
 						},
@@ -400,18 +450,15 @@ export default async function routes(fastify: FastifyTypebox) {
 					}),
 				]);
 
-				const paidOutPostIds = paidPostTransactions.map(
-					(ppt) => ppt.paidPost.postId,
-				);
-
 				const result: MediasRespBody = {
 					medias: await Promise.all(
 						medias.map(async (m) => {
-							const url = await resolveAuthenticatedMediaURL(
-								m,
-								cloudflareStream,
-								mediaUpload,
-							);
+							const { url, thumbnail } =
+								await resolveAuthenticatedMediaURL(
+									m,
+									cloudflareStream,
+									mediaUpload,
+								);
 
 							const media = ModelConverter.toIMedia(m, {
 								isPaidPost: m.postMedias.some(
@@ -422,6 +469,7 @@ export default async function routes(fastify: FastifyTypebox) {
 								),
 							});
 							media.url = url;
+							media.thumbnail = thumbnail;
 							return media;
 						}),
 					),
@@ -433,6 +481,50 @@ export default async function routes(fastify: FastifyTypebox) {
 					hasAccess,
 				};
 				return reply.send(result);
+			}
+
+			const [imageTotal, videoTotal] = await Promise.all([
+				prisma.upload.count({
+					where: {
+						type: UploadType.Image,
+						usage: UploadUsageType.POST,
+						postMedias: {
+							some: {
+								post: {
+									profileId: profile.id,
+									isArchived: false,
+									isPaidPost: false,
+								},
+							},
+						},
+					},
+				}),
+				prisma.upload.count({
+					where: {
+						type: UploadType.Video,
+						usage: UploadUsageType.POST,
+						postMedias: {
+							some: {
+								post: {
+									profileId: profile.id,
+									isArchived: false,
+									isPaidPost: false,
+								},
+							},
+						},
+					},
+				}),
+			]);
+
+			const total =
+				type === UploadType.Image
+					? imageTotal
+					: type === UploadType.Video
+					? videoTotal
+					: imageTotal + videoTotal;
+
+			if (isOutOfRange(page, size, total)) {
+				return reply.sendError(APIErrors.OUT_OF_RANGE);
 			}
 
 			const result: MediasRespBody = {
@@ -448,7 +540,11 @@ export default async function routes(fastify: FastifyTypebox) {
 		},
 	);
 
-	const validUsages: string[] = [UploadUsageType.CHAT, UploadUsageType.POST];
+	const validUsages: string[] = [
+		UploadUsageType.CHAT,
+		UploadUsageType.POST,
+		UploadUsageType.CUSTOM_VIDEO,
+	];
 
 	fastify.post<{
 		Params: MediaTypeParam;
@@ -500,13 +596,14 @@ export default async function routes(fastify: FastifyTypebox) {
 					storage: UploadStorageType.S3,
 				},
 			});
+			const { url } = await resolveAuthenticatedMediaURL(
+				created,
+				cloudflareStream,
+				mediaUpload,
+			);
 			const result: PresignedUrlRespBody = {
 				...ModelConverter.toIUpload(created),
-				url: await resolveAuthenticatedMediaURL(
-					created,
-					cloudflareStream,
-					mediaUpload,
-				),
+				url,
 				presignedUrl,
 			};
 			return reply.send(result);
@@ -536,7 +633,7 @@ export default async function routes(fastify: FastifyTypebox) {
 
 			if (!type) {
 				return reply.sendError(APIErrors.ITEM_MISSING("Type"));
-			} else if (type !== "Video") {
+			} else if (type !== UploadType.Video) {
 				return reply.sendError(
 					APIErrors.UPLOAD_INVALID_TYPE(
 						"This method only accepts Video uploads.",
@@ -568,18 +665,19 @@ export default async function routes(fastify: FastifyTypebox) {
 					userId: BigInt(session.userId),
 					type,
 					url: upload.streamMediaId,
-					usage: UploadUsageType.POST,
+					usage: usage as UploadUsageType,
 					storage: UploadStorageType.CLOUDFLARE_STREAM,
 				},
 			});
 
+			const { url } = await resolveAuthenticatedMediaURL(
+				created,
+				cloudflareStream,
+				mediaUpload,
+			);
 			const result: TusUploadRespBody = {
 				...ModelConverter.toIUpload(created),
-				url: await resolveAuthenticatedMediaURL(
-					created,
-					cloudflareStream,
-					mediaUpload,
-				),
+				url,
 				uploadUrl: upload.uploadUrl,
 			};
 
@@ -614,7 +712,7 @@ export default async function routes(fastify: FastifyTypebox) {
 			}
 
 			if (isSuccess) {
-				await prisma.upload.update({
+				const u = await prisma.upload.update({
 					where: {
 						id: BigInt(uploadId),
 						userId: BigInt(session.userId),
@@ -623,6 +721,20 @@ export default async function routes(fastify: FastifyTypebox) {
 						completed: true,
 					},
 				});
+
+				(async () => {
+					const blurhash =
+						(await mediaUpload.generateBlurhash(
+							u.url,
+							u.storage,
+						)) ?? "00RV*9";
+					await prisma.upload.update({
+						where: { id: u.id },
+						data: { blurhash },
+					});
+				})().catch((e) =>
+					logger.error(e, "Failed to generate blurhash"),
+				);
 			} else {
 				const upload = await prisma.upload.delete({
 					where: {
@@ -638,6 +750,8 @@ export default async function routes(fastify: FastifyTypebox) {
 					logger,
 				);
 			}
+
+			reply.status(200).send();
 		},
 	);
 

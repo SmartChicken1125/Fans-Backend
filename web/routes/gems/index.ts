@@ -44,6 +44,7 @@ import {
 	NotificationType,
 } from "../../CommonAPISchemas.js";
 import { TaxjarError } from "taxjar/dist/util/types.js";
+import XPService from "../../../common/service/XPService.js";
 
 const DECIMAL_TO_CENT_FACTOR = 100;
 
@@ -102,6 +103,7 @@ export default async function routes(
 	const feesCalculator = await container.resolve(FeesCalculator);
 	const gemExchangeService = await container.resolve(GemExchangeService);
 	const notification = await container.resolve(NotificationService);
+	const xpService = await container.resolve(XPService);
 	const emailTemplateSenderService = await container.resolve(
 		EmailTemplateSenderService,
 	);
@@ -415,12 +417,16 @@ export default async function routes(
 					);
 				}
 
-				// await xpService.addXPLog(
-				//  "Donate",
-				//  amount.getAmount(),
-				//  user.id,
-				//  creator.id,
-				// );
+				try {
+					await xpService.addXPLog(
+						"Donate",
+						amount.getAmount(),
+						user.id,
+						creator.id,
+					);
+				} catch (error) {
+					console.error("XP Error", error);
+				}
 			}
 
 			await payoutService.processPayout(creator.id).catch(() => void 0);
@@ -1738,6 +1744,8 @@ export default async function routes(
 
 			const event = request.body as AuthorizeNetWebhookEvent;
 
+			console.log(event, "event");
+
 			const processedEvent =
 				await prisma.processedWebhookEvent.findUnique({
 					where: { id: event.notificationId },
@@ -1772,7 +1780,7 @@ export default async function routes(
 					status = TransactionStatus.Disputed;
 					break;
 				case "net.authorize.payment.priorAuthCapture.created":
-					status = TransactionStatus.Pending;
+					status = TransactionStatus.Successful;
 					break;
 			}
 
@@ -2135,12 +2143,16 @@ export default async function routes(
 							);
 						}
 
-						// await xpService.addXPLog(
-						//  "Subscribe",
-						//  paymentSubscription.amount,
-						//  paymentSubscription.userId,
-						//  paymentSubscription.creatorId,
-						// );
+						try {
+							await xpService.addXPLog(
+								"Subscribe",
+								paymentSubscription.amount,
+								paymentSubscription.userId,
+								paymentSubscription.creatorId,
+							);
+						} catch (error) {
+							console.error("XP Error", error);
+						}
 
 						await payoutService
 							.processPayout(paymentSubscription.creatorId)
@@ -2673,12 +2685,16 @@ export default async function routes(
 								}
 							})();
 
-							// await xpService.addXPLog(
-							//  "Purchase",
-							//  paidPostTransaction.amount,
-							//  paidPostTransaction.userId,
-							//  paidPostTransaction.creatorId,
-							// );
+							try {
+								await xpService.addXPLog(
+									"Purchase",
+									paidPostTransaction.amount,
+									paidPostTransaction.userId,
+									paidPostTransaction.creatorId,
+								);
+							} catch (error) {
+								console.error("XP Error", error);
+							}
 						}
 					}
 
@@ -2784,12 +2800,16 @@ export default async function routes(
 								});
 							});
 
-							// await xpService.addXPLog(
-							//  "Purchase",
-							//  cameoPayment.amount,
-							//  cameoPayment.userId,
-							//  cameoPayment.creatorId,
-							// );
+							try {
+								await xpService.addXPLog(
+									"Purchase",
+									cameoPayment.amount,
+									cameoPayment.userId,
+									cameoPayment.creatorId,
+								);
+							} catch (error) {
+								console.error("XP Error", error);
+							}
 						}
 					}
 
@@ -2848,6 +2868,7 @@ export default async function routes(
 					}
 				} else if (videoCallPurchase) {
 					if (status) {
+						console.log("status", status);
 						await prisma.popupStatus.upsert({
 							where: { userId: videoCallPurchase.fanId },
 							update: {
@@ -2897,12 +2918,16 @@ export default async function routes(
 								});
 							});
 
-							// await xpService.addXPLog(
-							//  "Purchase",
-							//  videoCallPurchase.amount,
-							//  videoCallPurchase.fanId,
-							//  videoCallPurchase.creatorId,
-							// );
+							try {
+								await xpService.addXPLog(
+									"Purchase",
+									videoCallPurchase.amount,
+									videoCallPurchase.fanId,
+									videoCallPurchase.creatorId,
+								);
+							} catch (error) {
+								console.error("XP Error", error);
+							}
 						}
 					}
 

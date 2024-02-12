@@ -17,6 +17,7 @@ import { userAPIErrors } from "./user.js";
 import { pollAPIErrors } from "./poll.js";
 import { videocallAPIErrors } from "./videocall.js";
 import { cameoAPIErrors } from "./cameo.js";
+import { reviewAPIErrors } from "./review.js";
 
 const APIErrors = {
 	...genericAPIErrors,
@@ -37,6 +38,7 @@ const APIErrors = {
 	...pollAPIErrors,
 	...videocallAPIErrors,
 	...cameoAPIErrors,
+	...reviewAPIErrors,
 };
 
 dupeCheck(APIErrors);

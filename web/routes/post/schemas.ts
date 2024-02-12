@@ -128,16 +128,31 @@ export interface PostUpdateReqBody {
 	title?: string;
 	type?: PostType;
 	caption?: string;
-	thumb?: string;
-	resource?: string[] | string;
+	thumbId?: string;
+	// video, image, audios can be string
+	// fundraiser will be FundrasierResource
+	// poll will be PollResource
+	postMedias?: PostMedia[];
+	text?: string;
+	taggedPeoples?: TaggedPeople[];
 	advanced?: PostAdvanced;
 	location?: string;
 
 	roles?: string[];
+	tiers?: string[];
+	users?: string[];
 	categories?: string[];
-
-	startDate?: string;
-	endDate?: string;
+	episodeNumber?: number;
+	description?: string;
+	formIds?: string[];
+	isPrivate?: boolean;
+	isNoiseReduction?: boolean;
+	isAudioLeveling?: boolean;
+	paidPost?: PaidPost;
+	fundraiser?: FundraiserBody;
+	giveaway?: GiveawayBody;
+	poll?: PollBody;
+	schedule?: ScheduleBody;
 }
 
 export interface PostFilterQuery {
@@ -161,6 +176,7 @@ export interface PostFeedQuery {
 	size?: number;
 	categoryId?: string;
 	userListId?: string;
+	schedule?: boolean;
 }
 
 export interface PostArchiveReqBody {

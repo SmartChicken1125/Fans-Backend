@@ -12,6 +12,8 @@ import { ModelConverter } from "../../models/modelConverter.js";
 import { FastifyTypebox } from "../../types.js";
 import {
 	AddCreatorReqBody,
+	EnableUserlistRespBody,
+	GetUserlistQuery,
 	UserlistCreateReqBody,
 	UserlistRespBody,
 	UserlistUpdateReqBody,
@@ -19,6 +21,7 @@ import {
 } from "./schemas.js";
 import {
 	AddCreatorReqBodyValidator,
+	GetUserlistQueryValidator,
 	UserlistCreateReqBodyValidator,
 	UserlistUpdateReqBodyValidator,
 } from "./validation.js";
@@ -31,10 +34,10 @@ export default async function routes(fastify: FastifyTypebox) {
 	const sessionManager = await container.resolve(SessionManagerService);
 	const maxObjectLimit = parseInt(process.env.MAX_OBJECT_LIMIT ?? "100");
 
-	fastify.get<{ Querystring: PageQuery }>(
+	fastify.get<{ Querystring: GetUserlistQuery }>(
 		"/",
 		{
-			schema: { querystring: PageQueryValidator },
+			schema: { querystring: GetUserlistQueryValidator },
 			preHandler: [
 				sessionManager.sessionPreHandler,
 				sessionManager.requireAuthHandler,
@@ -44,10 +47,15 @@ export default async function routes(fastify: FastifyTypebox) {
 			try {
 				const session = request.session!;
 				const user = await session.getUser(prisma);
-				const { page = 1, size = DEFAULT_PAGE_SIZE } = request.query;
+				const {
+					page = 1,
+					size = DEFAULT_PAGE_SIZE,
+					enabled,
+				} = request.query;
 				const total = await prisma.userList.count({
 					where: {
 						userId: BigInt(session.userId),
+						enabled: enabled,
 					},
 				});
 				if (isOutOfRange(page, size, total)) {
@@ -56,6 +64,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				const rows = await prisma.userList.findMany({
 					where: {
 						userId: BigInt(session.userId),
+						enabled: enabled,
 					},
 					include: {
 						creators: {
@@ -68,9 +77,7 @@ export default async function routes(fastify: FastifyTypebox) {
 
 				const result: UserlistsRespBody = {
 					userlists: rows.map((r) => ({
-						...ModelConverter.toIUserlist(r, {
-							isActive: user.activeUserListId === r.id,
-						}),
+						...ModelConverter.toIUserlist(r),
 						creators: r.creators.map((u) =>
 							ModelConverter.toIProfile(u.profile),
 						),
@@ -119,9 +126,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				}
 
 				const result: UserlistRespBody = {
-					...ModelConverter.toIUserlist(userlist, {
-						isActive: user.activeUserListId === userlist.id,
-					}),
+					...ModelConverter.toIUserlist(userlist),
 					creators: userlist.creators.map((u) =>
 						ModelConverter.toIProfile(u.profile),
 					),
@@ -181,9 +186,7 @@ export default async function routes(fastify: FastifyTypebox) {
 					},
 				});
 				const result: UserlistRespBody = {
-					...ModelConverter.toIUserlist(created, {
-						isActive: user.activeUserListId === created.id,
-					}),
+					...ModelConverter.toIUserlist(created),
 					creators: created.creators.map((u) =>
 						ModelConverter.toIProfile(u.profile),
 					),
@@ -339,6 +342,91 @@ export default async function routes(fastify: FastifyTypebox) {
 			return reply
 				.status(202)
 				.send({ message: "Creator is added to user list!" });
+		},
+	);
+
+	fastify.post<{ Params: IdParams }>(
+		"/enable/:id",
+		{
+			schema: {
+				params: IdParamsValidator,
+			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session!;
+			const { id: userListId } = request.params;
+			const userList = await prisma.userList.findFirst({
+				where: {
+					id: BigInt(userListId),
+					userId: BigInt(session.userId),
+				},
+			});
+			if (!userList) {
+				return reply.sendError(APIErrors.ITEM_NOT_FOUND("Userlist"));
+			}
+
+			await prisma.userList.update({
+				where: { id: BigInt(userListId) },
+				data: { enabled: true },
+			});
+
+			const enabledUserlists = await prisma.userList.findMany({
+				where: { userId: BigInt(session.userId), enabled: true },
+			});
+
+			const result: EnableUserlistRespBody = {
+				enabledUserlists: enabledUserlists.map((ul) =>
+					ModelConverter.toIUserlist(ul),
+				),
+			};
+
+			return reply.send(result);
+		},
+	);
+	fastify.delete<{ Params: IdParams }>(
+		"/enable/:id",
+		{
+			schema: {
+				params: IdParamsValidator,
+			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session!;
+			const { id: userListId } = request.params;
+			const userList = await prisma.userList.findFirst({
+				where: {
+					id: BigInt(userListId),
+					userId: BigInt(session.userId),
+				},
+			});
+			if (!userList) {
+				return reply.sendError(APIErrors.ITEM_NOT_FOUND("Userlist"));
+			}
+
+			await prisma.userList.update({
+				where: { id: BigInt(userListId) },
+				data: { enabled: false },
+			});
+
+			const enabledUserlists = await prisma.userList.findMany({
+				where: { userId: BigInt(session.userId), enabled: true },
+			});
+
+			const result: EnableUserlistRespBody = {
+				enabledUserlists: enabledUserlists.map((ul) =>
+					ModelConverter.toIUserlist(ul),
+				),
+			};
+
+			return reply.send(result);
 		},
 	);
 }

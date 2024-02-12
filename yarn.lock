@@ -1398,6 +1398,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@fastify/request-context@npm:^5.1.0":
+  version: 5.1.0
+  resolution: "@fastify/request-context@npm:5.1.0"
+  dependencies:
+    fastify-plugin: "npm:^4.0.0"
+  checksum: 1608e2c646a417252282ffcd14656b8300e5a17bdd543402804d9bf8573e43647f3b456fc8ddb4ec2830aec03d2e44c40c1abacd87ef79c5826352214f004b03
+  languageName: node
+  linkType: hard
+
 "@fastify/send@npm:^2.0.0":
   version: 2.1.0
   resolution: "@fastify/send@npm:2.1.0"
@@ -1475,6 +1484,7 @@ __metadata:
     "@fastify/formbody": "npm:^7.4.0"
     "@fastify/multipart": "npm:^8.1.0"
     "@fastify/rate-limit": "npm:^8.0.3"
+    "@fastify/request-context": "npm:^5.1.0"
     "@fastify/static": "npm:^6.11.2"
     "@fastify/swagger": "npm:^8.12.0"
     "@fastify/swagger-ui": "npm:^2.0.1"
@@ -1558,7 +1568,7 @@ __metadata:
     tsconfig-paths: "npm:^4.2.0"
     twitter-lite: "npm:^1.1.0"
     typescript: "npm:^5.2.2"
-    uWebSockets.js: "https://github.com/uNetworking/uWebSockets.js#9bd2ac685e0e0cd1bb1b9ac8061b0b711d4e8bd9"
+    uWebSockets.js: "https://github.com/uNetworking/uWebSockets.js#bd2289c8d66e43ddaebfd8588a15767d285fbe0e"
     uuid: "npm:^9.0.1"
     validate-image-type: "npm:^2.0.0"
     xlsx: "npm:^0.18.5"
@@ -10033,10 +10043,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"uWebSockets.js@https://github.com/uNetworking/uWebSockets.js#9bd2ac685e0e0cd1bb1b9ac8061b0b711d4e8bd9":
-  version: 20.32.0
-  resolution: "uWebSockets.js@https://github.com/uNetworking/uWebSockets.js.git#commit=9bd2ac685e0e0cd1bb1b9ac8061b0b711d4e8bd9"
-  checksum: 86188faf676e667644249a13bb6c7d9e8c09399817d23b323b52bd502da0c95e8425dbeaab13f5eb586ef6247e02de343b1fca847881143e023d5792bbfbd85d
+"uWebSockets.js@https://github.com/uNetworking/uWebSockets.js#bd2289c8d66e43ddaebfd8588a15767d285fbe0e":
+  version: 20.41.0
+  resolution: "uWebSockets.js@https://github.com/uNetworking/uWebSockets.js.git#commit=bd2289c8d66e43ddaebfd8588a15767d285fbe0e"
+  checksum: 3b688f061e23945dd20e22642fd910a3a920302a095b75bae29fb28bf77b187ef7dc6bca81b7334846f2804fa8692d50c5670f7feafc905c85ec295f21c57dad
   languageName: node
   linkType: hard
 

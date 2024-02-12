@@ -1,6 +1,8 @@
 import { Inject, Injectable } from "async-injection";
 import {
 	Meeting,
+	MeetingDuration,
+	MeetingStatus,
 	MeetingType,
 	MeetingUser,
 	Profile,
@@ -13,6 +15,9 @@ import PrismaService from "./PrismaService.js";
 import BullMQService from "./BullMQService.js";
 import SnowflakeService from "./SnowflakeService.js";
 import { ChimeService } from "./ChimeService.js";
+import RPCManagerService from "./RPCManagerService.js";
+import { meetingReminder } from "../rpc/MeetingRPC.js";
+import { ModelConverter } from "../../web/models/modelConverter.js";
 
 @Injectable()
 export class MeetingService {
@@ -21,6 +26,7 @@ export class MeetingService {
 		private bullMQService: BullMQService,
 		private snowflake: SnowflakeService,
 		private chime: ChimeService,
+		private rpcService: RPCManagerService,
 		@Inject("logger") private logger: Logger,
 	) {}
 
@@ -36,12 +42,16 @@ export class MeetingService {
 		startDate = DateTime.utc().toJSDate(),
 		endDate = DateTime.utc().plus({ hours: 1 }).toJSDate(),
 		topics,
+		duration,
+		isInstant,
 	}: {
 		host: Profile;
 		userId: bigint;
 		startDate?: Date;
 		endDate?: Date;
 		topics?: string;
+		duration: MeetingDuration;
+		isInstant: boolean;
 	}) {
 		const meeting = await this.prisma.meeting.create({
 			data: {
@@ -51,6 +61,9 @@ export class MeetingService {
 				endDate,
 				chimeRequestToken: uuidv4(),
 				topics,
+				price: duration.price,
+				currency: duration.currency,
+				isInstant,
 			},
 		});
 		const settings = await this.prisma.meetingSettings.findFirst({
@@ -118,6 +131,19 @@ export class MeetingService {
 			return;
 		}
 
+		// Automatically decline pending meetings
+		if (meeting.status === MeetingStatus.Pending) {
+			this.prisma.meeting.update({
+				where: { id: meetingId },
+				data: { status: MeetingStatus.Declined },
+			});
+		}
+
+		if (meeting.status !== MeetingStatus.Accepted) {
+			this.logger.warn(`Meeting ${meetingId} wasn't accepted`);
+			return;
+		}
+
 		const chimeMeeting = await this.chime.createMeeting(
 			String(meetingId),
 			meeting.chimeRequestToken,
@@ -166,6 +192,14 @@ export class MeetingService {
 				});
 			}),
 		);
+
+		participants.forEach((participant) => {
+			meetingReminder(
+				this.rpcService,
+				participant.userId,
+				ModelConverter.toIMeeting(meeting),
+			);
+		});
 	}
 
 	async cleanRoom(meetingId: bigint) {

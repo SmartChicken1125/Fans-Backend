@@ -17,3 +17,7 @@ export interface VideoCallSettings {
 }
 
 export type UpdateVideoCallSettings = Partial<VideoCallSettings>;
+
+export type VideoCallSettingsReply = VideoCallSettings & {
+	videoPreview: string | undefined;
+};

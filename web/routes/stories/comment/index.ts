@@ -68,13 +68,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				},
 				include: {
 					story: {
-						include: {
-							storyMedias: {
-								include: {
-									upload: true,
-								},
-							},
-						},
+						include: { upload: true },
 					},
 					parentComment: true,
 				},
@@ -145,9 +139,7 @@ export default async function routes(fastify: FastifyTypebox) {
 											updatedAt: { gt: oneDayBefore },
 										},
 										include: {
-											storyMedias: {
-												include: { upload: true },
-											},
+											upload: true,
 											_count: {
 												select: {
 													storyComments: true,
@@ -327,13 +319,7 @@ export default async function routes(fastify: FastifyTypebox) {
 						},
 					},
 					story: {
-						include: {
-							storyMedias: {
-								include: {
-									upload: true,
-								},
-							},
-						},
+						include: { upload: true },
 					},
 					parentComment: {
 						include: {
@@ -444,13 +430,7 @@ export default async function routes(fastify: FastifyTypebox) {
 					},
 					parentComment: true,
 					story: {
-						include: {
-							storyMedias: {
-								include: {
-									upload: true,
-								},
-							},
-						},
+						include: { upload: true },
 					},
 				},
 			});

@@ -42,6 +42,7 @@ import {
 	UnsubscribeReqBodyValidator,
 } from "./validation.js";
 import { TaxjarError } from "taxjar/dist/util/types.js";
+import XPService from "../../../common/service/XPService.js";
 
 const DECIMAL_TO_CENT_FACTOR = 100;
 
@@ -59,6 +60,7 @@ export default async function routes(
 	const bullMQService = await container.resolve(BullMQService);
 	const notification = await container.resolve(NotificationService);
 	const siftService = await container.resolve(SiftService);
+	const xpService = await container.resolve(XPService);
 	const inboxManager = await container.resolve(InboxManagerService);
 	const emailTemplateSenderService = await container.resolve(
 		EmailTemplateSenderService,
@@ -701,7 +703,11 @@ export default async function routes(
 				},
 			});
 
-			// await xpService.addXPLog("Subscribe", 0, user.id, creatorId);
+			try {
+				await xpService.addXPLog("Subscribe", 0, user.id, creatorId);
+			} catch (error) {
+				console.error("XP Error", error);
+			}
 
 			(async () => {
 				const creator = await prisma.profile.findUnique({

@@ -7,6 +7,7 @@ export const CategoryCreateReqBodyValidator = Type.Object({
 	isActive: Type.Optional(Type.Boolean()),
 	roleIds: Type.Optional(Type.Array(Type.String({ format: "snowflake" }))),
 	postIds: Type.Optional(Type.Array(Type.String({ format: "snowflake" }))),
+	order: Type.Optional(Type.Number()),
 });
 
 assert<
@@ -18,6 +19,7 @@ export const CategoryUpdateReqBodyValidator = Type.Object({
 	isActive: Type.Optional(Type.Boolean()),
 	roleIds: Type.Optional(Type.Array(Type.String({ format: "snowflake" }))),
 	postIds: Type.Optional(Type.Array(Type.String({ format: "snowflake" }))),
+	order: Type.Optional(Type.Number()),
 });
 
 assert<

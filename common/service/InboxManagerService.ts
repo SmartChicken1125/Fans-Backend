@@ -2,8 +2,15 @@ import {
 	Message,
 	MessageChannel,
 	MessageChannelInbox,
+	Profile,
+	SubscriptionStatus,
+	TransactionStatus,
+	Upload,
+	UploadType,
 	UploadUsageType,
 } from "@prisma/client";
+import { Static, Type } from "@sinclair/typebox";
+import { TypeCompiler } from "@sinclair/typebox/compiler";
 import { Injectable, Injector } from "async-injection";
 import { Logger } from "pino";
 import {
@@ -12,6 +19,7 @@ import {
 	MessageChannelType,
 	MessageType,
 } from "../../web/CommonAPISchemas.js";
+import { chatAPIErrors } from "../../web/errors/chat.js";
 import {
 	ModelConverter,
 	UserBasicParam,
@@ -22,7 +30,20 @@ import { messageCreated } from "../rpc/ChatRPC.js";
 import PrismaService from "./PrismaService.js";
 import RPCManagerService from "./RPCManagerService.js";
 import SnowflakeService from "./SnowflakeService.js";
-import { chatAPIErrors } from "../../web/errors/chat.js";
+import { resolveURLsUploads } from "../../web/utils/UploadUtils.js";
+import CloudflareStreamService from "./CloudflareStreamService.js";
+import MediaUploadService from "./MediaUploadService.js";
+
+export const gifPayloadSchema = Type.Object({
+	source: Type.Union([Type.Literal("tenor"), Type.Literal("giphy")]),
+	id: Type.String({ maxLength: 64 }),
+});
+
+export type GifPayload = Static<typeof gifPayloadSchema>;
+
+const gifPayloadValidator = TypeCompiler.Compile(gifPayloadSchema);
+
+const DECIMAL_TO_CENT_FACTOR = 100;
 
 interface IMessageCreateOptionsBase {
 	/**
@@ -55,8 +76,8 @@ interface IMessageCreateOptionsText extends IMessageCreateOptionsBase {
 	parentId?: string;
 }
 
-interface IMessageCreateOptionsImage extends IMessageCreateOptionsBase {
-	messageType: MessageType.IMAGE;
+interface IMessageCreateOptionsMedia extends IMessageCreateOptionsBase {
+	messageType: MessageType.MEDIA;
 
 	/**
 	 * IDs of the uploads to attach to the message. Must be between 1 and 4 and belong to the user.
@@ -69,15 +90,31 @@ interface IMessageCreateOptionsImage extends IMessageCreateOptionsBase {
 	parentId?: string;
 }
 
+interface IMessageCreateOptionsGif extends IMessageCreateOptionsBase {
+	messageType: MessageType.GIF;
+
+	/**
+	 * Gif payload.
+	 */
+	gif: GifPayload;
+
+	/**
+	 * ID of the message to reply to. Must belong to the same channel.
+	 */
+	parentId?: string;
+}
+
 /**
  * Options for creating a message.
  */
 export type IMessageCreateOptions =
 	| IMessageCreateOptionsText
-	| IMessageCreateOptionsImage;
+	| IMessageCreateOptionsMedia
+	| IMessageCreateOptionsGif;
 
 export interface MessageWithUser extends Message {
 	user: UserBasicParam;
+	uploads?: Upload[];
 	parentMessage?: MessageWithUser;
 }
 
@@ -94,19 +131,25 @@ const systemUser: UserBasicParam = Object.seal({
 @Injectable()
 class InboxManagerService {
 	readonly #prisma: PrismaService;
-	readonly #snowflake: SnowflakeService;
 	readonly #rpc: RPCManagerService;
+	readonly #snowflake: SnowflakeService;
+	readonly #cloudflareStream: CloudflareStreamService;
+	readonly #mediaUpload: MediaUploadService;
 	readonly #logger: Logger;
 
 	constructor(
 		prisma: PrismaService,
 		rpc: RPCManagerService,
 		snowflake: SnowflakeService,
+		cloudflareStream: CloudflareStreamService,
+		mediaUpload: MediaUploadService,
 		logger: Logger,
 	) {
 		this.#prisma = prisma;
 		this.#rpc = rpc;
 		this.#snowflake = snowflake;
+		this.#cloudflareStream = cloudflareStream;
+		this.#mediaUpload = mediaUpload;
 		this.#logger = logger;
 	}
 
@@ -192,15 +235,130 @@ class InboxManagerService {
 					},
 				});
 
+			const xpLevel = await this.#prisma.userLevel.findFirst({
+				where: {
+					userId: otherParticipant?.user.id,
+					creatorId: inbox.userId,
+				},
+				select: {
+					userId: true,
+					level: true,
+					role: {
+						select: {
+							icon: true,
+							color: true,
+						},
+					},
+				},
+				orderBy: { level: "asc" },
+			});
+
 			const lastMessage = await this.#prisma.message.findFirst({
 				where: {
 					channelId: channel.id,
 					deletedAt: null,
 				},
+				include: {
+					uploads: true,
+				},
 				orderBy: {
 					id: "desc",
 				},
 			});
+
+			const unreadCount = await this.#prisma.message.count({
+				where: {
+					channelId: channel.id,
+					id: {
+						gt: inbox.lastReadMessageId ?? 0n,
+					},
+					deletedAt: null,
+				},
+			});
+
+			const subscription =
+				await this.#prisma.paymentSubscription.findFirst({
+					where: {
+						OR: [
+							{
+								userId: inbox.userId,
+								creatorId: otherParticipant?.user.profile?.id,
+								status: SubscriptionStatus.Active,
+							},
+							{
+								userId: otherParticipant?.user.profile?.id,
+								creatorId: inbox.userId,
+								status: SubscriptionStatus.Active,
+							},
+						],
+					},
+				});
+
+			const subscriptionPayments =
+				await this.#prisma.paymentSubscriptionTransaction.findMany({
+					where: {
+						creatorId: subscription?.creatorId,
+						status: TransactionStatus.Successful,
+					},
+					select: {
+						userId: true,
+						amount: true,
+						createdAt: true,
+					},
+					orderBy: { createdAt: "asc" },
+				});
+
+			const tips = await this.#prisma.gemsSpendingLog.findMany({
+				where: {
+					creatorId: subscription?.creatorId,
+					status: TransactionStatus.Successful,
+				},
+				select: {
+					spenderId: true,
+					amount: true,
+					createdAt: true,
+				},
+				orderBy: { createdAt: "asc" },
+			});
+
+			const paidPosts = await this.#prisma.paidPostTransaction.findMany({
+				where: {
+					creatorId: subscription?.creatorId,
+					status: TransactionStatus.Successful,
+				},
+				select: {
+					userId: true,
+					amount: true,
+					createdAt: true,
+				},
+				orderBy: { createdAt: "asc" },
+			});
+
+			const cameoPayments = await this.#prisma.cameoPayment.findMany({
+				where: {
+					creatorId: subscription?.creatorId,
+					status: TransactionStatus.Successful,
+				},
+				select: {
+					userId: true,
+					amount: true,
+					createdAt: true,
+				},
+				orderBy: { createdAt: "asc" },
+			});
+
+			const earnings = [
+				...subscriptionPayments,
+				...tips,
+				...paidPosts,
+				...cameoPayments,
+			].reduce((acc, curr) => acc + curr.amount, 0);
+
+			await resolveURLsUploads(
+				lastMessage?.uploads ?? [],
+				this.#cloudflareStream,
+				this.#mediaUpload,
+			);
 
 			const user = otherParticipant?.user;
 
@@ -220,8 +378,11 @@ class InboxManagerService {
 						? ModelConverter.toIMessage({ ...lastMessage, user })
 						: undefined,
 					lastReadMessageId: inbox.lastReadMessageId?.toString(),
-					isBlocked: false,
+					isBlocked: !subscription,
 					isPinned: inbox.isPinned,
+					earnings: earnings / DECIMAL_TO_CENT_FACTOR,
+					xpLevel: xpLevel?.level ?? 0,
+					unreadCount,
 				};
 			}
 		}
@@ -233,8 +394,11 @@ class InboxManagerService {
 			otherParticipant: undefined,
 			lastMessage: undefined,
 			lastReadMessageId: "0",
-			isBlocked: false,
+			isBlocked: true,
 			isPinned: inbox.isPinned,
+			earnings: 0,
+			xpLevel: 0,
+			unreadCount: 0,
 		};
 	}
 
@@ -516,7 +680,7 @@ class InboxManagerService {
 					parentId: parentId ? BigInt(parentId) : undefined,
 				},
 			});
-		} else if (messageType === MessageType.IMAGE) {
+		} else if (messageType === MessageType.MEDIA) {
 			const { uploadIds } = options;
 
 			if (!uploadIds.length || uploadIds.length > 4) {
@@ -532,8 +696,10 @@ class InboxManagerService {
 					id: {
 						in: uploadIds,
 					},
+					type: { in: [UploadType.Image, UploadType.Video] },
 					usage: UploadUsageType.CHAT,
 					userId,
+					completed: true,
 				},
 			});
 
@@ -559,6 +725,30 @@ class InboxManagerService {
 							id: BigInt(u.id),
 						})),
 					},
+					parentId: parentId ? BigInt(parentId) : undefined,
+				},
+			});
+		} else if (messageType === MessageType.GIF) {
+			const { gif } = options;
+			if (!gifPayloadValidator.Check(gif)) {
+				throw new APIErrorException(
+					genericAPIErrors.INVALID_REQUEST("Invalid 'gif' payload"),
+				);
+			}
+
+			message = await this.#prisma.message.create({
+				include: {
+					parentMessage: true,
+				},
+				data: {
+					id: this.#snowflake.gen(),
+					channelId,
+					userId,
+					content: JSON.stringify({
+						source: gif.source,
+						id: gif.id,
+					}),
+					messageType,
 					parentId: parentId ? BigInt(parentId) : undefined,
 				},
 			});
@@ -615,9 +805,18 @@ export async function inboxManagerFactory(
 	const prisma = await container.resolve(PrismaService);
 	const rpc = await container.resolve(RPCManagerService);
 	const snowflake = await container.resolve(SnowflakeService);
+	const cloudflareStream = await container.resolve(CloudflareStreamService);
+	const mediaUpload = await container.resolve(MediaUploadService);
 	const logger = await container.resolve<Logger>("logger");
 
-	return new InboxManagerService(prisma, rpc, snowflake, logger);
+	return new InboxManagerService(
+		prisma,
+		rpc,
+		snowflake,
+		cloudflareStream,
+		mediaUpload,
+		logger,
+	);
 }
 
 export default InboxManagerService;

@@ -38,8 +38,9 @@ enum PromotionType {
 }
 
 enum PostType {
-    Video
     Photo
+    Video
+    Media
     Text
     Audio
     Fundraiser
@@ -95,6 +96,7 @@ enum UploadStorageType {
 enum UploadUsageType {
     POST // Used in posts, stories, comments, etc.
     CHAT // Used for chat messages, unlisted
+    CUSTOM_VIDEO // Used in custom videos (cameo feature)
 }
 
 enum PostReportFlag {
@@ -132,6 +134,17 @@ enum ProfileReportFlag {
     OTHER
 }
 
+enum MessageReportFlag {
+    ILLEGAL_CONTENT
+    UNDERAGE_USER
+    IMPERSONATION_OR_IDENTITY_THEFT
+    PROMOTING_HATE_SPEECH_OR_DISCRIMINATION
+    PROMOTING_DANGEROUS_BEHAVIORS
+    INVOLVED_IN_SPAN_OR_SCAM_ACTIVITIES
+    INFRINGEMENT_OF_MY_COPYRIGHT
+    OTHER
+}
+
 enum CreatorReferralTransactionType {
     Tip
     Subscription
@@ -145,29 +158,28 @@ enum FanReferralTransactionType {
 }
 
 model User {
-    id               BigInt           @id
-    username         String
-    displayName      String
-    phonenumber      String?
-    email            String           @unique
-    password         String
-    avatar           String?
-    country          String?
-    language         LanguageType     @default(English)
-    gender           GenderType?
-    birthdate        DateTime?
-    disabled         Boolean          @default(false)
-    isShowProfile    Boolean          @default(false)
-    type             UserType         @default(Fan)
-    verifiedAt       DateTime?
-    activeUserList   UserList?        @relation(fields: [activeUserListId], references: [id], onDelete: Cascade)
-    activeUserListId BigInt?          @unique
-    updatedAt        DateTime         @updatedAt
-    ageVerifyId      String?
-    ageVerifyKycId   String?
-    ageVerifyStatus  AgeVerifyStatus?
-    ageVerifyReason  String?
-    settings         Json?
+    id              BigInt           @id
+    username        String
+    displayName     String
+    phonenumber     String?
+    email           String           @unique
+    password        String
+    avatar          String?
+    country         String?
+    language        LanguageType     @default(English)
+    gender          GenderType?
+    birthdate       DateTime?
+    disabled        Boolean          @default(false)
+    isShowProfile   Boolean          @default(false)
+    type            UserType         @default(Fan)
+    verifiedAt      DateTime?
+    updatedAt       DateTime         @updatedAt
+    ageVerifyId     String?
+    ageVerifyKycId  String?
+    ageVerifyStatus AgeVerifyStatus?
+    ageVerifyReason String?
+    settings        Json?
+    isOlderThan18   Boolean?
 
     paymentMethods                  PaymentMethod[]
     gems                            GemsBalance[]
@@ -220,6 +232,9 @@ model User {
     banLog                          BanLog[]
     videoCallPurchases              VideoCallPurchase[]
     postMediaTags                   PostMediaTag[]
+    messageReports                  MessageReport[]
+    customVideoOrders               CustomVideoOrder[]
+    Review                          Review[]
 
     @@index([username], type: BTree)
     @@index([displayName], type: BTree)
@@ -629,6 +644,7 @@ model Profile {
     referrer              CreatorReferral? @relation(name: "CreatorReferral", fields: [referrerCode], references: [code], onDelete: SetNull)
     referrerCode          String?
     isDisplayShop         Boolean          @default(true)
+    isDisplayReview       Boolean          @default(true)
 
     unusedAgeVerifyId     String?          @map("ageVerifyId")
     unusedAgeVerifyStatus AgeVerifyStatus? @map("ageVerifyStatus")
@@ -677,6 +693,9 @@ model Profile {
     CustomVideoSettings                 CustomVideoSettings[]
     videoCallPurchase                   VideoCallPurchase[]
     meetingVacations                    MeetingVacation[]
+    storyTags                           StoryTag[]
+    customVideoOrders                   CustomVideoOrder[]
+    Review                              Review[]
 
     @@index([userId], type: BTree)
     @@index([displayName], type: BTree)
@@ -1090,6 +1109,7 @@ model Category {
     profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
     profileId BigInt
     isActive  Boolean  @default(true)
+    order     Int      @default(0)
     updatedAt DateTime @updatedAt
 
     roles RoleCategory[]
@@ -1409,6 +1429,7 @@ model Upload {
     url       String
     origin    String?
     blurhash  String?
+    thumbnail String? // for video only
     completed Boolean           @default(false)
     isPinned  Boolean           @default(false)
     length    Int               @default(0)
@@ -1417,7 +1438,6 @@ model Upload {
     playlists        PlaylistUpload[]
     postForm         PostForm?
     postMedias       PostMedia[]
-    storyMedias      StoryMedia[]
     postThumbs       Post[]
     paidPostThumbs   PaidPost[]
     fundraiserThumbs Fundraiser[]
@@ -1425,6 +1445,8 @@ model Upload {
     pollThumbs       Poll[]
     playlistThumbs   Playlist[]
     messageThumbs    Message[]
+    storys           Story[]
+    customVideos     CustomVideoOrder[]
 
     @@index([userId], type: BTree)
     @@index([type], type: Hash)
@@ -1549,8 +1571,7 @@ model UserList {
     enabled   Boolean  @default(true)
     updatedAt DateTime @updatedAt
 
-    creators   UserListUser[]
-    activeUser User?
+    creators UserListUser[]
 
     @@index([userId], type: BTree)
     @@index([title], type: BTree)
@@ -1724,6 +1745,7 @@ model Message {
 
     uploads                 Upload[]
     chatPaidPostTransaction ChatPaidPostTransaction[]
+    messageReports          MessageReport[]
 
     @@index([channelId], type: BTree)
     @@index([userId], type: BTree)
@@ -1733,13 +1755,33 @@ model Message {
     @@map("messages")
 }
 
+model MessageReport {
+    id        BigInt            @id
+    user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+    userId    BigInt
+    message   Message           @relation(fields: [messageId], references: [id], onDelete: Cascade)
+    messageId BigInt
+    flag      MessageReportFlag @default(OTHER)
+    status    ReportStatus      @default(OPEN)
+    reason    String?
+    updatedAt DateTime          @updatedAt
+
+    @@index([userId], type: BTree)
+    @@index([messageId], type: BTree)
+    @@index([status], type: Hash)
+    @@index([reason], type: BTree)
+    @@index([updatedAt], type: BTree)
+    @@map("reports_for_message")
+}
+
 model Story {
     id          BigInt   @id
     profile     Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
     profileId   BigInt
+    upload      Upload   @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+    uploadId    BigInt   @default(0)
     isHighlight Boolean  @default(false)
     isArchived  Boolean  @default(false)
-    medias      String[]
     shareCount  Int      @default(0)
     updatedAt   DateTime @updatedAt
 
@@ -1748,7 +1790,8 @@ model Story {
     storyLikes    StoryLike[]
     hiddenUsers   HiddenStory[]
     reports       StoryReport[]
-    storyMedias   StoryMedia[]
+    storyUrls     StoryUrl[]
+    storyTags     StoryTag[]
 
     @@index([profileId], type: BTree)
     @@index([isHighlight], type: Hash)
@@ -1758,17 +1801,33 @@ model Story {
     @@map("stories")
 }
 
-model StoryMedia {
+model StoryUrl {
     id        BigInt   @id
-    upload    Upload   @relation(fields: [uploadId], references: [id], onDelete: Cascade)
-    uploadId  BigInt
     story     Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
     storyId   BigInt
+    url       String
+    pointX    Int      @default(0)
+    pointY    Int      @default(0)
     updatedAt DateTime @updatedAt
 
-    @@index([uploadId], type: BTree)
     @@index([storyId], type: BTree)
-    @@map("story_medias")
+    @@map("story_urls")
+}
+
+model StoryTag {
+    id        BigInt   @id
+    story     Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
+    storyId   BigInt
+    creator   Profile  @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+    creatorId BigInt
+    color     String   @default("#484CFF")
+    pointX    Int      @default(0)
+    pointY    Int      @default(0)
+    updatedAt DateTime @updatedAt
+
+    @@index([storyId], type: BTree)
+    @@index([creatorId], type: BTree)
+    @@map("story_tags")
 }
 
 model StoryLike {
@@ -2191,6 +2250,9 @@ model Meeting {
     videoCallTimeExtensionPurchases VideoCallTimeExtensionPurchase[]
     status                          MeetingStatus                    @default(Pending)
     createdAt                       DateTime                         @default(now())
+    price                           Int                              @default(0) // denormalized field, only affects UI and sorting by price
+    currency                        String                           @default("USD") // denormalized field, only affects UI
+    isInstant                       Boolean                          @default(false)
 
     @@index([hostId], type: BTree)
     @@index([startDate], type: BTree)
@@ -2288,6 +2350,7 @@ model MeetingSettings {
     notificationsByEmail      Boolean              @default(true)
     notificationsByPhone      Boolean              @default(true)
     videoCallsEnabled         Boolean              @default(false)
+    videoPreviewStreamId      String?
 
     @@id([profileId])
     @@map("meeting_settings")
@@ -2339,7 +2402,7 @@ model CustomVideoSettings {
     customContentType             String?
     volumeTimeUnit                CameoVolumeTimeUnit @default(Daily)
     volumeLimit                   Int?
-    fulfillmentTime               Int?
+    fulfillmentTime               Int                 @default(24) // hours
     description                   String?
     sexualContentEnabled          Boolean             @default(false)
     agreedToTerms                 Boolean             @default(false)
@@ -2405,4 +2468,61 @@ model VideoCallTimeExtensionPurchase {
     @@index([meetingId], type: BTree)
     @@index([transactionId], type: Hash)
     @@map("video_call_time_extension_purchases")
+}
+
+enum CustomVideoOrderStatus {
+    Pending
+    Cancelled
+    Declined
+    Accepted
+    Completed
+}
+
+enum Pronoun {
+    He
+    She
+    They
+}
+
+model CustomVideoOrder {
+    id               BigInt                 @id
+    status           CustomVideoOrderStatus @default(Pending)
+    recipientName    String?
+    recipientPronoun Pronoun?
+    instructions     String?
+    review           String?
+    score            Int?
+    duration         Int
+    price            Int                    @default(0) // denormalized field, only affects UI and sorting by price
+    currency         String                 @default("USD") // denormalized field, only affects UI
+    fan              User                   @relation(fields: [fanId], references: [id], onDelete: Cascade)
+    fanId            BigInt
+    creator          Profile                @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+    creatorId        BigInt
+    createdAt        DateTime               @default(now())
+    dueDate          DateTime               @default(now())
+    videoUpload      Upload?                @relation(fields: [videoUploadId], references: [id], onDelete: Cascade)
+    videoUploadId    BigInt?
+    autoDeclineJobId String?
+
+    @@index([fanId], type: BTree)
+    @@index([creatorId], type: BTree)
+    @@index([dueDate], type: BTree)
+    @@index([createdAt], type: BTree)
+    @@map("custom_video_order")
+}
+
+model Review {
+    id        BigInt   @id
+    user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+    userId    BigInt
+    creator   Profile  @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+    creatorId BigInt
+    score     Float
+    text      String?
+    createdAt DateTime @default(now())
+
+    @@index([userId], type: BTree)
+    @@index([creatorId], type: BTree)
+    @@map("reviews")
 }

@@ -111,6 +111,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				gender,
 				language,
 				isShowProfile,
+				isOlderThan18,
 			} = request.body;
 			const phoneNumber = phonenumber
 				? LibPhoneNumberJS.parsePhoneNumber(phonenumber)
@@ -153,6 +154,7 @@ export default async function routes(fastify: FastifyTypebox) {
 					displayName,
 					gender,
 					isShowProfile,
+					isOlderThan18,
 					language,
 					phonenumber: phoneNumber?.formatInternational(),
 					username,
@@ -422,7 +424,14 @@ export default async function routes(fastify: FastifyTypebox) {
 					include: {
 						thumbMedia: true,
 						postMedias: {
-							include: { upload: true },
+							include: {
+								upload: true,
+								postMediaTags: {
+									include: {
+										user: true,
+									},
+								},
+							},
 						},
 						roles: true,
 						tiers: true,

@@ -8,6 +8,7 @@ import Fastify from "fastify";
 import multer from "fastify-multer";
 import { writeFile } from "node:fs/promises";
 import { Logger } from "pino";
+import fastifyRequestContext from "@fastify/request-context";
 import APIErrorPlugin from "../common/fastifyPlugins/APIErrorPlugin.js";
 import DependencyInjectionPlugin from "../common/fastifyPlugins/DependencyInjectionPlugin.js";
 import SentryPlugin from "../common/fastifyPlugins/SentryPlugin.js";
@@ -19,6 +20,7 @@ import scheduledPost from "./workers/scheduledPost.js";
 import scheduledNotification from "./workers/scheduledNotification.js";
 import { startWatching } from "./emailTemplates/components/stylesheet.js";
 import scheduledMeeting from "./workers/scheduledMeeting.js";
+import scheduledCameo from "./workers/scheduledCameo.js";
 
 export default async function main(container: Container) {
 	container = container.clone();
@@ -29,6 +31,7 @@ export default async function main(container: Container) {
 	await scheduledPost(container);
 	await scheduledNotification(container);
 	await scheduledMeeting(container);
+	await scheduledCameo(container);
 	await startWatching(container);
 
 	const host = process.env.HOST_API ?? "::";
@@ -82,6 +85,10 @@ export default async function main(container: Container) {
 				},
 			},
 		},
+	});
+
+	fastify.register(fastifyRequestContext, {
+		hook: "preValidation",
 	});
 
 	if (process.env.NODE_ENV !== "production") {
@@ -323,19 +330,25 @@ export default async function main(container: Container) {
 		reply.send({ status: "ok" });
 	});
 
-	if (process.env.NODE_ENV !== "production") {
-		fastify.register(import("./routes/cameo/durations/index.js"), {
-			prefix: "/api/v1/cameo/durations",
-		});
+	fastify.register(import("./routes/cameo/durations/index.js"), {
+		prefix: "/api/v1/cameo/durations",
+	});
 
-		fastify.register(import("./routes/cameo/settings/index.js"), {
-			prefix: "/api/v1/cameo/settings",
-		});
+	fastify.register(import("./routes/cameo/settings/index.js"), {
+		prefix: "/api/v1/cameo/settings",
+	});
 
-		fastify.register(import("./routes/cameo/index.js"), {
-			prefix: "/api/v1/cameo",
-		});
-	}
+	fastify.register(import("./routes/cameo/orders/index.js"), {
+		prefix: "/api/v1/cameo/orders",
+	});
+
+	fastify.register(import("./routes/cameo/index.js"), {
+		prefix: "/api/v1/cameo",
+	});
+
+	fastify.register(import("./routes/review/index.js"), {
+		prefix: "api/v1/reviews",
+	});
 
 	await fastify.listen({
 		host,

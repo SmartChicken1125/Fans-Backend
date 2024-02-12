@@ -82,6 +82,9 @@ import OndatoService, {
 import SiftService, { siftFactory } from "./common/service/SiftService.js";
 import { chimeFactory, ChimeService } from "./common/service/ChimeService.js";
 import { MeetingService } from "./common/service/MeetingService.js";
+import { PaymentService } from "./common/service/PaymentService.js";
+import XPService, { xpServiceFactory } from "./common/service/XPService.js";
+import { CameoService } from "./common/service/CameoService.js";
 
 dotenv.config();
 
@@ -192,7 +195,10 @@ container.bindAsyncFactory(StripeService, stripeFactory).asSingleton();
 container.bindAsyncFactory(TaxJarService, taxJarFactory).asSingleton();
 container.bindAsyncFactory(SiftService, siftFactory).asSingleton();
 container.bindAsyncFactory(ChimeService, chimeFactory).asSingleton();
+container.bindAsyncFactory(XPService, xpServiceFactory).asSingleton();
 container.bindClass(MeetingService).asSingleton();
+container.bindClass(PaymentService).asSingleton();
+container.bindClass(CameoService).asSingleton();
 
 for (let service of services) {
 	logger.info(`Starting service: ${service}`);

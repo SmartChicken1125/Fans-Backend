@@ -74,7 +74,14 @@ export default async function routes(fastify: FastifyTypebox) {
 				include: {
 					thumbMedia: true,
 					postMedias: {
-						include: { upload: true },
+						include: {
+							upload: true,
+							postMediaTags: {
+								include: {
+									user: true,
+								},
+							},
+						},
 					},
 					_count: {
 						select: {
@@ -158,7 +165,14 @@ export default async function routes(fastify: FastifyTypebox) {
 				include: {
 					thumbMedia: true,
 					postMedias: {
-						include: { upload: true },
+						include: {
+							upload: true,
+							postMediaTags: {
+								include: {
+									user: true,
+								},
+							},
+						},
 					},
 					_count: {
 						select: { bookmarks: true },
@@ -269,7 +283,14 @@ export default async function routes(fastify: FastifyTypebox) {
 						include: {
 							thumbMedia: true,
 							postMedias: {
-								include: { upload: true },
+								include: {
+									upload: true,
+									postMediaTags: {
+										include: {
+											user: true,
+										},
+									},
+								},
 							},
 						},
 					},

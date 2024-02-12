@@ -23,6 +23,7 @@ export type UploadType = (typeof uploadTypes)[number];
 const postTypes = [
 	"Video",
 	"Photo",
+	"Media",
 	"Text",
 	"Audio",
 	"Fundraiser",
@@ -50,6 +51,18 @@ export type MeetingType = (typeof meetingTypes)[number];
 
 const meetingStatuses = ["Pending", "Accepted", "Declined", "Cancelled"];
 export type MeetingStatusType = (typeof meetingStatuses)[number];
+
+const customVideoStatuses = [
+	"Pending",
+	"Accepted",
+	"Declined",
+	"Cancelled",
+	"Completed",
+] as const;
+export type CustomVideoStatusType = (typeof customVideoStatuses)[number];
+
+const pronouns = ["He", "She", "They"] as const;
+export type PronounType = (typeof pronouns)[number];
 
 const ageVerifyStatus = [
 	"PENDING",
@@ -189,12 +202,12 @@ export interface IUser {
 	gender?: GenderType;
 	birthdate?: string;
 	verifiedAt?: string;
-	activeUserListId?: string;
 	createdAt?: string;
 	updatedAt?: string;
 	ageVerifyId?: string;
 	ageVerifyStatus?: AgeVerifyStatus;
 	isShowProfile?: boolean;
+	isOlderThan18?: boolean;
 }
 
 export interface IUserBasic {
@@ -328,6 +341,7 @@ export interface ICategory {
 	name: string;
 	isActive: boolean;
 	updatedAt: string;
+	order: number;
 	postCount?: number;
 }
 
@@ -335,6 +349,7 @@ export interface IMedia {
 	id: string;
 	type: UploadType;
 	url?: string;
+	thumbnail?: string;
 	blurhash?: string;
 	origin?: string;
 	isPinned: boolean;
@@ -366,8 +381,9 @@ export interface IPlaylistUpload {
 
 export interface Media {
 	id: string;
+	type: UploadType;
 	url?: string;
-	thumb?: string;
+	thumbnail?: string;
 	blurhash?: string;
 }
 
@@ -567,6 +583,7 @@ export interface IProfile {
 	updatedAt: string;
 	activeStories?: IStory[];
 	isDisplayShop: boolean;
+	isDisplayReview: boolean;
 }
 
 export interface IUserlist {
@@ -646,10 +663,32 @@ export interface IStory {
 	updatedAt: string;
 	likeCount?: number;
 	commentCount?: number;
-	medias: string[];
+	media: string;
 	isCommented?: boolean;
 	isLiked?: boolean;
 	shareCount: number;
+	storyTags: IStoryTag[];
+	storyUrls: IStoryUrl[];
+}
+
+export interface IStoryUrl {
+	id: string;
+	storyId: string;
+	url: string;
+	pointX: number;
+	pointY: number;
+	updatedAt: string;
+}
+
+export interface IStoryTag {
+	id: string;
+	storyId: string;
+	creatorId: string;
+	creator: IProfile;
+	color: string;
+	pointX: number;
+	pointY: number;
+	updatedAt: string;
 }
 
 export interface IStoryReport {
@@ -668,6 +707,7 @@ export interface IUpload {
 	userId: string;
 	type: UploadType;
 	url: string;
+	thumb?: string;
 	origin?: string;
 	completed: boolean;
 	isPinned: boolean;
@@ -727,12 +767,17 @@ export interface IConversationMeta {
 	lastMessage?: IMessage;
 	isBlocked: boolean;
 	isPinned: boolean;
+	earnings: number;
+	xpLevel: number;
+	unreadCount: number;
 }
 
 export const enum MessageType {
 	TEXT = 0,
-	IMAGE = 1,
+	MEDIA = 1,
 	TIP = 2,
+	PAID_POST = 3,
+	GIF = 4,
 }
 
 export const enum MessageChannelType {
@@ -747,7 +792,7 @@ export interface IMessage {
 	messageType: MessageType;
 	content: string;
 	emoji?: number;
-	images?: string[];
+	media?: Media[];
 	previewImages?: string;
 	value?: number;
 	status?: string;
@@ -981,6 +1026,8 @@ export interface IMeeting {
 	startDate: Date;
 	endDate: Date;
 	status: MeetingStatusType;
+	price: { currency: string; amount: number };
+	topics: string;
 }
 
 export interface IMeetingDuration {
@@ -1010,4 +1057,42 @@ export interface ICameoDuration {
 	price: number;
 	currency: string;
 	isEnabled: boolean;
+}
+
+export interface ICameoOrder {
+	id: string;
+	fanId: string;
+	creatorId: string;
+	recipientName: string;
+	recipientPronoun: PronounType | undefined;
+	status: CustomVideoStatusType;
+	instructions: string;
+	duration: number;
+	price: { currency: string; amount: number };
+	currency: string;
+	review: string;
+	score: number | undefined;
+	dueDate: Date;
+	video: { url: string; thumbnail?: string | undefined } | undefined;
+}
+
+export interface IReview {
+	id: string;
+	creatorId: string;
+	creator?: IProfile;
+	userId: string;
+	user?: IUser;
+	text?: string;
+	score: number;
+	createdAt: string;
+}
+
+export interface IPostMediaTag {
+	id: string;
+	postMediaId: string;
+	userId: string;
+	user: IUser;
+	pointX: number;
+	pointY: number;
+	updatedAt: string;
 }

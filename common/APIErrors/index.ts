@@ -36,6 +36,7 @@ export const enum ErrorSource {
 	Poll = 16,
 	Meeting = 17,
 	Cameo = 18,
+	Review = 19,
 }
 
 export function errorCode(source: ErrorSource, code: number): number {

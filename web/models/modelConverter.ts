@@ -42,7 +42,6 @@ import {
 	Story,
 	StoryComment,
 	StoryCommentLike,
-	StoryMedia,
 	StoryReport,
 	StoryViewer,
 	Subscription,
@@ -62,6 +61,11 @@ import {
 	MeetingDuration,
 	CustomVideoDuration,
 	MeetingVacation,
+	StoryUrl,
+	StoryTag,
+	CustomVideoOrder,
+	Review,
+	PostMediaTag,
 } from "@prisma/client";
 import {
 	IApplication,
@@ -125,6 +129,13 @@ import {
 	IMeetingDuration,
 	Media,
 	IMeetingVacation,
+	IStoryUrl,
+	IStoryTag,
+	ICameoOrder,
+	PronounType,
+	CustomVideoStatusType,
+	IReview,
+	IPostMediaTag,
 } from "../CommonAPISchemas.js";
 import SnowflakeService from "../../common/service/SnowflakeService.js";
 import { PostAdvanced } from "../routes/post/schemas.js";
@@ -157,13 +168,14 @@ export class ModelConverter {
 			gender: user.gender ?? undefined,
 			birthdate: user.birthdate?.toISOString(),
 			verifiedAt: user.verifiedAt?.toISOString(),
-			activeUserListId: user.activeUserListId?.toString(),
 			createdAt: SnowflakeService.extractDate(user.id).toISOString(),
 			updatedAt: user.updatedAt.toISOString(),
 			ageVerifyId: (isSelf ? user.ageVerifyId : null) ?? undefined,
 			ageVerifyStatus:
 				(isSelf ? user.ageVerifyStatus : null) ?? undefined,
 			isShowProfile: user.isShowProfile,
+			isOlderThan18:
+				user.isOlderThan18 === null ? undefined : user.isOlderThan18,
 		};
 	}
 
@@ -185,6 +197,7 @@ export class ModelConverter {
 			name: category.name,
 			isActive: category.isActive,
 			updatedAt: category.updatedAt.toISOString(),
+			order: category.order,
 			postCount: category._count?.posts,
 		};
 	}
@@ -347,7 +360,10 @@ export class ModelConverter {
 				comments?: number;
 			};
 			profile?: Profile;
-			postMedias: (PostMedia & { upload: Upload })[];
+			postMedias: (PostMedia & {
+				upload: Upload;
+				postMediaTags?: (PostMediaTag & { user: User })[];
+			})[];
 			thumbMedia: Upload | null;
 		},
 		metadata?: {
@@ -369,17 +385,22 @@ export class ModelConverter {
 			thumb: post.thumbMedia
 				? {
 						id: post.thumbMedia.id.toString(),
+						type: post.thumbMedia.type,
 						url: post.thumbMedia.url,
 						blurhash: post.thumbMedia.blurhash ?? undefined,
 				  }
 				: undefined,
 			medias: post.postMedias.map((pm) => ({
 				id: pm.uploadId.toString(),
+				type: pm.upload.type,
 				url:
 					metadata?.isSelf || !post.isPaidPost || metadata?.isPaidOut
 						? pm.upload.url
 						: undefined,
 				blurhash: pm.upload.blurhash ?? undefined,
+				tags: pm.postMediaTags?.map((pmt) =>
+					ModelConverter.toIPostMediaTag(pmt),
+				),
 			})),
 			advanced: post.advanced
 				? {
@@ -450,27 +471,37 @@ export class ModelConverter {
 		const thumb: Media | undefined = post.thumbMedia
 			? {
 					id: post.thumbMedia.id.toString(),
-					url: await resolveAuthenticatedMediaURL(
+					type: post.thumbMedia.type,
+					...(await resolveAuthenticatedMediaURL(
 						post.thumbMedia,
 						cloudflareStream,
 						mediaUpload,
-					),
+					).then((r) => ({
+						url: r.url,
+						thumbnail: r.thumbnail ?? undefined,
+					}))),
 					blurhash: post.thumbMedia.blurhash ?? undefined,
 			  }
 			: undefined;
 		const medias: Media[] = await Promise.all(
-			post.postMedias.map(async (pm) => ({
-				id: pm.uploadId.toString(),
-				url:
+			post.postMedias.map(async (pm) => {
+				const { url, thumbnail } =
 					!post.isPaidPost || metadata?.isPaidOut
 						? await resolveAuthenticatedMediaURL(
 								pm.upload,
 								cloudflareStream,
 								mediaUpload,
 						  )
-						: undefined,
-				blurhash: pm.upload.blurhash ?? undefined,
-			})),
+						: { url: undefined, thumbnail: undefined };
+
+				return {
+					id: pm.uploadId.toString(),
+					type: pm.upload.type,
+					url,
+					thumb: thumbnail ?? undefined,
+					blurhash: pm.upload.blurhash ?? undefined,
+				};
+			}),
 		);
 
 		return {
@@ -492,13 +523,13 @@ export class ModelConverter {
 			isSelf: false,
 		},
 	): IMedia {
+		const showPost =
+			metadata.isSelf || !metadata.isPaidPost || metadata.isPaidOut;
 		return {
 			id: upload.id.toString(),
 			type: upload.type,
-			url:
-				metadata.isSelf || !metadata.isPaidPost || metadata.isPaidOut
-					? upload.url
-					: undefined,
+			url: showPost ? upload.url : undefined,
+			thumbnail: showPost ? upload.thumbnail ?? undefined : undefined,
 			blurhash: upload.blurhash ?? undefined,
 			origin: upload.origin ?? undefined,
 			isPinned: upload.isPinned,
@@ -552,6 +583,7 @@ export class ModelConverter {
 			thumb: fundraiser.thumbMedia
 				? {
 						id: fundraiser.thumbMedia.id.toString(),
+						type: fundraiser.thumbMedia.type,
 						url: fundraiser.thumbMedia.url,
 						blurhash: fundraiser.thumbMedia.blurhash ?? undefined,
 				  }
@@ -576,6 +608,7 @@ export class ModelConverter {
 			thumb: giveaway.thumbMedia
 				? {
 						id: giveaway.thumbMedia.id.toString(),
+						type: giveaway.thumbMedia.type,
 						url: giveaway.thumbMedia.url,
 						blurhash: giveaway.thumbMedia.blurhash ?? undefined,
 				  }
@@ -599,6 +632,7 @@ export class ModelConverter {
 			thumb: paidPost.thumbMedia
 				? {
 						id: paidPost.thumbMedia.id.toString(),
+						type: paidPost.thumbMedia.type,
 						url: paidPost.thumbMedia.url,
 						blurhash: paidPost.thumbMedia.blurhash ?? undefined,
 				  }
@@ -635,6 +669,7 @@ export class ModelConverter {
 			thumb: poll.thumbMedia
 				? {
 						id: poll.thumbMedia.id.toString(),
+						type: poll.thumbMedia.type,
 						url: poll.thumbMedia.url,
 						blurhash: poll.thumbMedia.blurhash ?? undefined,
 				  }
@@ -742,9 +777,8 @@ export class ModelConverter {
 					storyLikes?: number;
 					storyComments?: number;
 				};
-				storyMedias: (StoryMedia & {
-					upload: Upload;
-				})[];
+
+				upload: Upload;
 			})[];
 		},
 	): IProfile {
@@ -783,6 +817,7 @@ export class ModelConverter {
 				? profile.stories.map((s) => ModelConverter.toIStory(s))
 				: undefined,
 			isDisplayShop: profile.isDisplayShop,
+			isDisplayReview: profile.isDisplayReview,
 			updatedAt: profile.updatedAt.toISOString(),
 			createdAt: SnowflakeService.extractDate(profile.id).toISOString(),
 		};
@@ -874,9 +909,7 @@ export class ModelConverter {
 									storyLikes?: number;
 									storyComments?: number;
 								};
-								storyMedias: (StoryMedia & {
-									upload: Upload;
-								})[];
+								upload: Upload;
 							})[];
 					  })
 					| null;
@@ -918,7 +951,9 @@ export class ModelConverter {
 				storyLikes?: number;
 				storyComments?: number;
 			};
-			storyMedias: (StoryMedia & { upload: Upload })[];
+			upload: Upload;
+			storyTags?: (StoryTag & { creator: Profile })[];
+			storyUrls?: StoryUrl[];
 		},
 		metadata?: { isCommented?: boolean; isLiked?: boolean },
 	): IStory {
@@ -930,10 +965,40 @@ export class ModelConverter {
 			likeCount: story._count?.storyLikes,
 			commentCount: story._count?.storyComments,
 			updatedAt: story.updatedAt.toISOString(),
-			medias: story.storyMedias.map((sm) => sm.upload.url),
+			media: story.upload.url,
 			isCommented: metadata?.isCommented,
 			isLiked: metadata?.isLiked,
 			shareCount: story.shareCount,
+			storyUrls: story.storyUrls
+				? story.storyUrls.map((su) => ModelConverter.toIStoryUrl(su))
+				: [],
+			storyTags: story.storyTags
+				? story.storyTags.map((st) => ModelConverter.toIStoryTag(st))
+				: [],
+		};
+	}
+
+	static toIStoryUrl(storyUrl: StoryUrl): IStoryUrl {
+		return {
+			id: storyUrl.id.toString(),
+			storyId: storyUrl.storyId.toString(),
+			url: storyUrl.url,
+			pointX: storyUrl.pointX,
+			pointY: storyUrl.pointY,
+			updatedAt: storyUrl.updatedAt.toISOString(),
+		};
+	}
+
+	static toIStoryTag(storyTag: StoryTag & { creator: Profile }): IStoryTag {
+		return {
+			id: storyTag.id.toString(),
+			storyId: storyTag.storyId.toString(),
+			creatorId: storyTag.creatorId.toString(),
+			creator: this.toIProfile(storyTag.creator),
+			color: storyTag.color,
+			pointX: storyTag.pointX,
+			pointY: storyTag.pointY,
+			updatedAt: storyTag.updatedAt.toISOString(),
 		};
 	}
 
@@ -1025,6 +1090,15 @@ export class ModelConverter {
 
 	static transformMessage(
 		message: Message & { user: UserBasicParam; uploads?: Upload[] },
+		metadata: {
+			isPaidPost?: boolean;
+			isPaidOut?: boolean;
+			isSelf?: boolean;
+		} = {
+			isPaidPost: false,
+			isPaidOut: false,
+			isSelf: false,
+		},
 	): IMessage {
 		return {
 			id: message.id.toString(),
@@ -1033,8 +1107,10 @@ export class ModelConverter {
 			createdAt: SnowflakeService.extractDate(message.id).toISOString(),
 			content: message.content,
 			messageType: message.messageType,
-			images: message.uploads
-				? message.uploads.map((u) => u.url)
+			media: message.uploads
+				? message.uploads.map((u) =>
+						ModelConverter.toIMedia(u, metadata),
+				  )
 				: undefined,
 		};
 	}
@@ -1047,6 +1123,15 @@ export class ModelConverter {
 				user: UserBasicParam;
 				uploads?: Upload[];
 			};
+		},
+		metadata: {
+			isPaidPost?: boolean;
+			isPaidOut?: boolean;
+			isSelf?: boolean;
+		} = {
+			isPaidPost: false,
+			isPaidOut: false,
+			isSelf: false,
 		},
 	): IMessage {
 		const transformedMessage = ModelConverter.transformMessage(message);
@@ -1106,9 +1191,7 @@ export class ModelConverter {
 									storyLikes?: number;
 									storyComments?: number;
 								};
-								storyMedias: (StoryMedia & {
-									upload: Upload;
-								})[];
+								upload: Upload;
 							})[];
 					  })
 					| null;
@@ -1227,6 +1310,8 @@ export class ModelConverter {
 			startDate: data.startDate,
 			endDate: data.endDate,
 			status: data.status,
+			price: { currency: data.currency, amount: data.price },
+			topics: data.topics || "",
 		};
 	}
 
@@ -1300,6 +1385,70 @@ export class ModelConverter {
 			price: Number(data.price),
 			currency: data.currency,
 			isEnabled: data.isEnabled,
+		};
+	}
+
+	static toICustomVideoOrder(
+		cloudflareStream: CloudflareStreamService,
+		mediaService: MediaUploadService,
+	): (
+		data: CustomVideoOrder & { videoUpload?: Upload | null },
+	) => Promise<ICameoOrder> {
+		return async (
+			data: CustomVideoOrder & { videoUpload?: Upload | null },
+		) => ({
+			id: data.id.toString(),
+			fanId: data.fanId.toString(),
+			creatorId: data.creatorId.toString(),
+			recipientName: data.recipientName || "",
+			recipientPronoun: data.recipientPronoun || undefined,
+			status: data.status,
+			instructions: data.instructions || "",
+			duration: data.duration,
+			price: { currency: data.currency, amount: data.price },
+			currency: data.currency,
+			review: data.review || "",
+			score: data.score || undefined,
+			dueDate: data.dueDate,
+			video: data.videoUpload
+				? await resolveAuthenticatedMediaURL(
+						data.videoUpload,
+						cloudflareStream,
+						mediaService,
+				  )
+				: undefined,
+		});
+	}
+
+	static toIReview(
+		data: Review & {
+			creator?: Profile;
+			user?: User;
+		},
+	): IReview {
+		return {
+			id: data.id.toString(),
+			creatorId: data.creatorId.toString(),
+			creator: data.creator ? this.toIProfile(data.creator) : undefined,
+			userId: data.userId.toString(),
+			user: data.user ? this.toIUser(data.user) : undefined,
+			text: data.text ?? "",
+			score: data.score,
+			createdAt: data.createdAt.toISOString(),
+		};
+	}
+
+	static toIPostMediaTag(
+		postMediaTag: PostMediaTag & { user: User },
+	): IPostMediaTag {
+		return {
+			id: postMediaTag.id.toString(),
+			postMediaId: postMediaTag.postMediaId.toString(),
+			userId: postMediaTag.userId.toString(),
+			user: ModelConverter.toIUser(postMediaTag.user),
+			pointX: postMediaTag.pointX,
+			pointY: postMediaTag.pointY,
+			updatedAt: postMediaTag.updatedAt.toISOString(),
 		};
 	}
 }

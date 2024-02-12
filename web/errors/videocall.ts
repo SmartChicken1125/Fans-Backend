@@ -106,4 +106,11 @@ export const videocallAPIErrors = {
 			message: "Invalid meeting state",
 		},
 	},
+	MEETING_DISABLED_BY_CREATOR: {
+		status: 400,
+		data: {
+			code: errorCode(ErrorSource.Meeting, 16),
+			message: "Cannot book a meeting. Creator has disabled video calls.",
+		},
+	},
 };

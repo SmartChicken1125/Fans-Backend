@@ -9,6 +9,7 @@ import PrismaService from "../../../common/service/PrismaService.js";
 import APIErrors from "../../errors/index.js";
 import { ModelConverter } from "../../models/modelConverter.js";
 import { IdParams } from "../../../common/validators/schemas.js";
+import CloudflareStreamService from "../../../common/service/CloudflareStreamService.js";
 import { IdParamsValidator } from "../../../common/validators/validation.js";
 import { GetAvailabilityQueryValidator } from "./validation.js";
 import {
@@ -24,6 +25,7 @@ export default async function routes(fastify: FastifyTypebox) {
 	const logger = await container.resolve<Logger>("logger");
 	const sessionManager = await container.resolve(SessionManagerService);
 	const prisma = await container.resolve(PrismaService);
+	const cloudflareStream = await container.resolve(CloudflareStreamService);
 
 	fastify.get<{
 		Querystring: GetAvailabilityQuery;
@@ -81,8 +83,9 @@ export default async function routes(fastify: FastifyTypebox) {
 				start: DateTime,
 			) => {
 				if (timeInterval.contains(start)) {
-					const numberOfIntervals =
-						interval.length / request.query.duration;
+					const numberOfIntervals = Math.floor(
+						interval.length / request.query.duration,
+					);
 					for (let i = 0; i < numberOfIntervals; i += 1) {
 						const rsIntervalStart = start.plus({
 							minute: i * request.query.duration,
@@ -236,6 +239,13 @@ export default async function routes(fastify: FastifyTypebox) {
 				!!durations.length &&
 				!!intervals.length;
 
+			const videoPreview =
+				(settings.videoPreviewStreamId &&
+					cloudflareStream.getSignedVideoUrl(
+						settings.videoPreviewStreamId,
+					)) ||
+				undefined;
+
 			return reply.send({
 				bufferBetweenCalls: settings.bufferBetweenCalls,
 				meetingType: settings.meetingType,
@@ -246,6 +256,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				meetingTitle: settings.title || "",
 				meetingDescription: settings.description || "",
 				meetingDurations,
+				videoPreview,
 				isAvailable,
 			});
 		},

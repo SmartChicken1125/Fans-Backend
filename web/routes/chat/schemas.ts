@@ -2,7 +2,8 @@
 // frontend: helper/endpoints/chat/schemas.ts
 // backend: web/routes/chat/schemas.ts
 
-import { IConversationMeta, IMessage } from "../../CommonAPISchemas.js";
+import { MessageReportFlag } from "@prisma/client";
+import { IConversationMeta, IMedia, IMessage } from "../../CommonAPISchemas.js";
 
 export interface ChatPaginatedQuery {
 	page: number;
@@ -57,6 +58,7 @@ export interface ChatConversationMessagesPostReqBody {
 	content: string;
 	uploadIds?: string[];
 	parentId?: string;
+	gif?: { source: "tenor" | "giphy"; id: string };
 }
 
 export interface ChatConversationMessagesPostRespBody extends IMessage {}
@@ -83,4 +85,26 @@ export interface ChatAutomatedMessageWelcomeReqBody {
 	text: string;
 	image?: string;
 	enabled: boolean;
+}
+
+export interface CreateMessageReportReqBody {
+	messageId: string;
+	reportFlag: MessageReportFlag;
+	reason?: string;
+}
+
+export interface MediasRespBody {
+	medias: IMedia[];
+	page: number;
+	size: number;
+	total: number;
+	videoTotal?: number;
+	imageTotal?: number;
+	hasAccess: boolean;
+}
+
+export interface ChannelMediaPageQuery {
+	page: number;
+	size: number;
+	type?: string;
 }

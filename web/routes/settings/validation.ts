@@ -27,6 +27,7 @@ export const UpdateSettingReqBodyValidator = Type.Object({
 	gender: Type.Optional(Type.Enum(GenderType)),
 	language: Type.Optional(Type.Enum(LanguageType)),
 	isShowProfile: Type.Optional(Type.Boolean()),
+	isOlderThan18: Type.Optional(Type.Boolean()),
 });
 assert<
 	Equals<Static<typeof UpdateSettingReqBodyValidator>, UpdateSettingReqBody>

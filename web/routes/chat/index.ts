@@ -1,45 +1,49 @@
-import { Message, SubscriptionStatus, UploadUsageType } from "@prisma/client";
-import { Json } from "../../../common/Types.js";
-import { messageCreated } from "../../../common/rpc/ChatRPC.js";
+import { SubscriptionStatus, UploadType } from "@prisma/client";
+import { DEFAULT_PAGE_SIZE, isOutOfRange } from "../../../common/pagination.js";
+import CloudflareStreamService from "../../../common/service/CloudflareStreamService.js";
 import InboxManagerService, {
 	IMessageCreateOptions,
+	MessageWithUser,
 } from "../../../common/service/InboxManagerService.js";
+import MediaUploadService from "../../../common/service/MediaUploadService.js";
 import PrismaService from "../../../common/service/PrismaService.js";
 import RPCManagerService from "../../../common/service/RPCManagerService.js";
 import SessionManagerService from "../../../common/service/SessionManagerService.js";
 import SnowflakeService from "../../../common/service/SnowflakeService.js";
-import {
-	IMessage,
-	MessageChannelType,
-	MessageType,
-} from "../../CommonAPISchemas.js";
+import { IMessage, MessageType } from "../../CommonAPISchemas.js";
 import APIErrors from "../../errors/index.js";
-import { ModelConverter, UserBasicParam } from "../../models/modelConverter.js";
+import { ModelConverter } from "../../models/modelConverter.js";
 import { FastifyTypebox } from "../../types.js";
+import { resolveURLsUploads } from "../../utils/UploadUtils.js";
 import {
+	ChannelMediaPageQuery,
 	ChatAutomatedMessageWelcomeReqBody,
 	ChatConversationByUserRespBody,
 	ChatConversationMessagesPostReqBody,
 	ChatConversationMessagesQuery,
 	ChatConversationMessagesRespBody,
 	ChatConversationRespBody,
+	ChatDeleteMessageIdParams,
 	ChatFansListReqParams,
 	ChatFansListRespBody,
 	ChatIdParams,
-	ChatDeleteMessageIdParams,
 	ChatNoteReqBody,
 	ChatUserIdParams,
 	ChatWSInfoRespBody,
+	CreateMessageReportReqBody,
+	MediasRespBody,
 } from "./schemas.js";
 import {
+	ChannelMediaPageQueryValidator,
 	ChatAutomatedMessageWelcomeReqBodyValidator,
 	ChatConversationMessagesPostReqBodyValidator,
 	ChatConversationMessagesQueryValidator,
+	ChatDeleteMessageIdParamsValidator,
 	ChatFansListReqParamsValidator,
 	ChatIdParamsValidator,
-	ChatDeleteMessageIdParamsValidator,
 	ChatNoteReqBodyValidator,
 	ChatUserIdParamsValidator,
+	CreateMessageReportReqBodyValidator,
 } from "./validation.js";
 
 export default async function routes(fastify: FastifyTypebox) {
@@ -50,6 +54,9 @@ export default async function routes(fastify: FastifyTypebox) {
 	const sessionManager = await container.resolve(SessionManagerService);
 	const rpc = await container.resolve(RPCManagerService);
 	const inboxManager = await container.resolve(InboxManagerService);
+	const cloudflareStream = await container.resolve(CloudflareStreamService);
+	const mediaUpload = await container.resolve(MediaUploadService);
+	const maxObjectLimit = parseInt(process.env.MAX_OBJECT_LIMIT ?? "100");
 
 	const chatWebSocketURL = process.env.PUBLIC_CHAT_WS_URL;
 
@@ -200,18 +207,27 @@ export default async function routes(fastify: FastifyTypebox) {
 					take: request.query.limit,
 				})
 				.then((u) => inboxManager.resolveUsers(u));
+			const allUploads = messages.flatMap((m) => m.uploads ?? []);
 
-			console.log(messages);
+			await resolveURLsUploads(allUploads, cloudflareStream, mediaUpload);
 
 			messages.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
+			const getMetadata = (m: MessageWithUser) => ({
+				isSelf: m.userId === user.id,
+				isPaidPost: false, // todo(alexandra)
+				isPaidFor: false,
+			});
+
 			reply.send({
-				messages: messages.map(ModelConverter.toIMessage),
+				messages: messages.map((m) =>
+					ModelConverter.toIMessage(m, getMetadata(m)),
+				),
 			} as ChatConversationMessagesRespBody);
 		},
 	);
 
-	const validMessageTypes = [MessageType.TEXT, MessageType.IMAGE];
+	const validMessageTypes = [MessageType.TEXT, MessageType.MEDIA];
 
 	// Sends a message to a conversation
 	fastify.post<{
@@ -260,13 +276,27 @@ export default async function routes(fastify: FastifyTypebox) {
 					messageType,
 					parentId: request.body.parentId,
 				};
-			} else if (messageType === MessageType.IMAGE) {
+			} else if (messageType === MessageType.MEDIA) {
 				options = {
 					channelId,
 					userId: user.id,
 					messageType,
 					uploadIds:
 						request.body.uploadIds?.map((s) => BigInt(s)) ?? [],
+					parentId: request.body.parentId,
+				};
+			} else if (messageType === MessageType.GIF) {
+				if (!request.body.gif) {
+					return reply.sendError(
+						APIErrors.INVALID_REQUEST("Missing 'gif' payload"),
+					);
+				}
+
+				options = {
+					channelId,
+					userId: user.id,
+					messageType,
+					gif: request.body.gif,
 					parentId: request.body.parentId,
 				};
 			} else {
@@ -699,6 +729,158 @@ export default async function routes(fastify: FastifyTypebox) {
 
 			await inboxManager.deleteInbox(user.id, channelId);
 			reply.status(201).send();
+		},
+	);
+
+	fastify.get<{
+		Querystring: ChannelMediaPageQuery;
+		Params: ChatIdParams;
+		Reply: MediasRespBody;
+	}>(
+		"/conversation/:id/medias",
+		{
+			schema: {
+				querystring: ChannelMediaPageQueryValidator,
+				params: ChatIdParamsValidator,
+			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session!;
+			const user = await session.getUser(prisma);
+
+			const { id } = request.params;
+			const { page = 1, size = DEFAULT_PAGE_SIZE, type } = request.query;
+
+			const channel = await inboxManager.getChannelParticipants(
+				BigInt(id),
+				user.id,
+			);
+			if (!channel) {
+				return reply.sendError(APIErrors.CHANNEL_NOT_FOUND);
+			}
+
+			const messageIds = await prisma.message
+				.findMany({
+					where: {
+						channelId: BigInt(id),
+						deletedAt: null,
+					},
+					select: { id: true },
+				})
+				.then((messages) => messages.map((msg) => msg.id));
+
+			const total = await prisma.upload.count({
+				where: {
+					messageThumbs: {
+						some: {
+							id: {
+								in: messageIds,
+							},
+						},
+					},
+					type: type
+						? { in: [UploadType.Video, UploadType.Image] }
+						: undefined,
+				},
+			});
+
+			if (isOutOfRange(page, size, total)) {
+				return reply.sendError(APIErrors.OUT_OF_RANGE);
+			}
+
+			const uploads = await prisma.upload.findMany({
+				where: {
+					messageThumbs: {
+						some: {
+							id: { in: messageIds },
+						},
+					},
+					...(type !== "All" && {
+						type: {
+							in: [UploadType.Video, UploadType.Image].filter(
+								(t) => t === type,
+							),
+						},
+					}),
+				},
+				include: {
+					messageThumbs: true,
+				},
+				orderBy: [{ isPinned: "desc" }, { updatedAt: "desc" }],
+				take: size,
+				skip: (page - 1) * size,
+			});
+
+			const medias = uploads.map((upload) => ({
+				id: upload.id.toString(),
+				type: upload.type,
+				url: upload.url,
+				thumbnail:
+					upload.thumbnail === null ? undefined : upload.thumbnail,
+				blurhash:
+					upload.blurhash === null ? undefined : upload.blurhash,
+				origin: upload.origin === null ? undefined : upload.origin,
+				isPinned: upload.isPinned,
+				updatedAt: upload.updatedAt.toISOString(),
+			}));
+
+			reply.send({
+				medias,
+				page,
+				size,
+				total,
+				hasAccess: true,
+			});
+		},
+	);
+
+	fastify.post<{ Body: CreateMessageReportReqBody }>(
+		"/message/report",
+		{
+			schema: {
+				body: CreateMessageReportReqBodyValidator,
+			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session!;
+			const user = await session.getUser(prisma);
+
+			const data = request.body;
+			const message = await prisma.message.findFirst({
+				where: { id: BigInt(data.messageId) },
+			});
+
+			if (!message) {
+				return reply.sendError(APIErrors.ITEM_NOT_FOUND("Post"));
+			}
+
+			const messageReportCount = await prisma.messageReport.count({
+				where: { userId: BigInt(session.userId) },
+			});
+
+			if (messageReportCount >= maxObjectLimit) {
+				return reply.sendError(APIErrors.REACHED_MAX_OBJECT_LIMIT);
+			}
+
+			await prisma.messageReport.create({
+				data: {
+					id: snowflake.gen(),
+					messageId: BigInt(data.messageId),
+					flag: data.reportFlag,
+					reason: data.reason,
+					userId: BigInt(session.userId),
+				},
+			});
+
+			return reply.status(201).send();
 		},
 	);
 }

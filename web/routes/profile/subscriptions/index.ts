@@ -184,12 +184,15 @@ export default async function routes(fastify: FastifyTypebox) {
 			preHandler: [
 				sessionManager.sessionPreHandler,
 				sessionManager.requireAuthHandler,
+				sessionManager.requireProfileHandler,
 			],
 		},
 		async (request, reply) => {
+			const session = request.session!;
 			const { id } = request.params;
+			const profile = (await session.getProfile(prisma))!;
 			const subscription = await prisma.subscription.findFirst({
-				where: { id: BigInt(id) },
+				where: { id: BigInt(id), profileId: profile.id },
 			});
 			if (!subscription) {
 				return reply.sendError(

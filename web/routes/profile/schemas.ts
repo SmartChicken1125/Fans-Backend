@@ -55,6 +55,8 @@ export interface ProfileUpdateReqBody {
 	isFanReferralEnabled?: boolean;
 	fanReferralShare?: number;
 	marketingContentLink?: string;
+	isDisplayShop?: boolean;
+	isDisplayReview?: boolean;
 }
 
 export interface SocialLink {
@@ -95,6 +97,10 @@ export interface ProfileRespBody extends IProfile {
 	playlists?: IPlayList[];
 	fanReferrals?: IFanReferral[];
 	hasAccess?: boolean;
+	review?: {
+		total: number;
+		score: number;
+	};
 }
 
 export interface ProfilesRespBody {
@@ -134,7 +140,7 @@ export interface AgeVerifyOndatoWebhookReqBody {
 	};
 }
 
-export interface PreviewCreateReqBody {
+export interface PreviewUpdateReqBody {
 	previews: string[];
 }
 
@@ -144,4 +150,8 @@ export interface AvatarCreateReqBody {
 
 export interface ReferralLinkRespBody {
 	referralCode: string;
+}
+
+export interface PreviewUpdateRespBody {
+	previews: string[];
 }

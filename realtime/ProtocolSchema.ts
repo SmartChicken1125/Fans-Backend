@@ -1,4 +1,10 @@
-import { IConversationMeta, IMessage, IUser } from "../web/CommonAPISchemas.js";
+import {
+	ICameoOrder,
+	IConversationMeta,
+	IMeeting,
+	IMessage,
+	IUser,
+} from "../web/CommonAPISchemas.js";
 
 export const enum Opcode {
 	Ping = 0,
@@ -10,6 +16,9 @@ export const enum Opcode {
 	MessageEvent,
 	InboxSync,
 	UserSync,
+	MeetingEvent,
+	MeetingReminder,
+	CameoEvent,
 
 	// used while checking whether the opcode is in the range
 	Max,
@@ -95,6 +104,35 @@ export type PayloadInboxSync = Payload<Opcode.InboxSync, IConversationMeta>;
 
 export type PayloadUserSync = Payload<Opcode.UserSync, Partial<IUser>>;
 
+export enum MeetingEventType {
+	Requested,
+	Accepted,
+	Cancelled,
+}
+
+export type PayloadMeetingEvent = Payload<
+	Opcode.MeetingEvent,
+	{ type: MeetingEventType; meeting: IMeeting }
+>;
+
+export type PayloadMeetingReminder = Payload<
+	Opcode.MeetingReminder,
+	Partial<IMeeting>
+>;
+
+export enum CameoEventType {
+	Requested,
+	Accepted,
+	Declined,
+	Cancelled,
+	Completed,
+}
+
+export type PayloadCameoEvent = Payload<
+	Opcode.CameoEvent,
+	{ type: MeetingEventType; order: ICameoOrder }
+>;
+
 export type WebSocketPayload =
 	| PayloadPing
 	| PayloadPong
@@ -104,4 +142,7 @@ export type WebSocketPayload =
 	| PayloadReadySession
 	| PayloadMessageEvent
 	| PayloadInboxSync
-	| PayloadUserSync;
+	| PayloadUserSync
+	| PayloadMeetingEvent
+	| PayloadMeetingReminder
+	| PayloadCameoEvent;

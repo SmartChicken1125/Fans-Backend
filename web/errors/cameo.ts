@@ -22,4 +22,41 @@ export const cameoAPIErrors = {
 			message: "Cameo settings not found",
 		},
 	},
+	INVALID_CAMEO_HOST: (id: string) => ({
+		status: 400,
+		data: {
+			code: errorCode(ErrorSource.Cameo, 4),
+			message: `Cannot order custom video for the provided host: ${id}`,
+		},
+	}),
+	CAMEO_ORDER_NOT_FOUND: {
+		status: 404,
+		data: {
+			code: errorCode(ErrorSource.Cameo, 5),
+			message: "Cameo order not found",
+		},
+	},
+	INVALID_CAMEO_ORDER_STATE: {
+		status: 400,
+		data: {
+			code: errorCode(ErrorSource.Cameo, 6),
+			message: "Invalid cameo order state",
+		},
+	},
+	CAMEO_REACHED_ORDER_LIMIT: {
+		status: 400,
+		data: {
+			code: errorCode(ErrorSource.Cameo, 7),
+			message:
+				"Custom video order limit reached for the current creator. Please try again later.",
+		},
+	},
+	CAMEO_DISABLED_BY_CREATOR: {
+		status: 400,
+		data: {
+			code: errorCode(ErrorSource.Cameo, 8),
+			message:
+				"Cannot order custom video. Creator has disabled this feature.",
+		},
+	},
 };

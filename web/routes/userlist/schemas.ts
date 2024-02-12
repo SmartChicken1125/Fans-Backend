@@ -25,3 +25,13 @@ export interface UserlistsRespBody {
 export interface AddCreatorReqBody {
 	creatorId: string;
 }
+
+export interface GetUserlistQuery {
+	page?: number;
+	size?: number;
+	enabled?: boolean;
+}
+
+export interface EnableUserlistRespBody {
+	enabledUserlists: IUserlist[];
+}

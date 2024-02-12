@@ -11,20 +11,15 @@ export interface CreateMeetingBody {
 	topics?: string;
 }
 
-export interface AcceptMeetingParams {
-	meetingId: string;
-}
-
 export type MeetingStatus = "pending" | "accepted" | "declined" | "cancelled";
-
-export type MeetingsQuerySortType = "oldest" | "newest";
 
 export interface MeetingsQuery {
 	hostId?: string;
 	before?: string;
 	after?: string;
 	status?: MeetingStatus;
-	sort?: MeetingsQuerySortType;
+	sort?: string;
+	withAttendees?: "1";
 }
 
 export interface GetChimeReply {

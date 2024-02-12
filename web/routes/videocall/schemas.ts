@@ -32,4 +32,5 @@ export interface VideoCallProfile {
 	meetingDescription?: string;
 	meetingDurations: VideoCallProfileMeetingDuration[];
 	isAvailable: boolean;
+	videoPreview: string | undefined;
 }

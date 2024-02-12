@@ -44,13 +44,13 @@ class XPService {
 			},
 		});
 
-		const currentLevel = userLevel ? userLevel.level : 1;
+		const currentLevel = userLevel ? userLevel.level : 0;
 		const currentXp = userLevel ? userLevel.xp + xp : xp;
 		let nextLevel = currentLevel;
 		let nextXp = currentXp;
 		for (;;) {
 			if (nextLevel >= 100) break;
-			const requiredXp = nextLevel * 5;
+			const requiredXp = (nextLevel + 1) * 5;
 			if (nextXp >= requiredXp) {
 				nextLevel++;
 				nextXp -= requiredXp;
@@ -106,7 +106,9 @@ class XPService {
 						creator: { connect: { id: creatorId } },
 						level: nextLevel,
 						xp: nextXp,
-						role: { connect: { id: nextRoleId } },
+						role: nextRoleId
+							? { connect: { id: nextRoleId } }
+							: undefined,
 					},
 				});
 			}
