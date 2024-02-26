@@ -2,11 +2,13 @@ import { UploadType } from "@prisma/client";
 import { Static, Type } from "@sinclair/typebox";
 import { Equals, assert } from "tsafe";
 import {
+	DownloadMediasReqBody,
 	FinishUploadReqBody,
 	GeneratePresignedUrlReqBody,
 	MediaTypeParam,
 	MediaUploadReqBody,
 	PostMediaPageQuery,
+	SortType,
 	TusUploadReqBody,
 } from "./schemas.js";
 
@@ -46,10 +48,18 @@ assert<
 >();
 
 export const PostMediaPageQueryValidator = Type.Object({
+	sort: Type.Optional(Type.Enum(SortType)),
 	type: Type.Optional(Type.Enum(UploadType)),
 	page: Type.Optional(Type.Number()),
 	size: Type.Optional(Type.Number()),
 });
 assert<
 	Equals<Static<typeof PostMediaPageQueryValidator>, PostMediaPageQuery>
+>();
+
+export const DownloadMediasReqBodyValidator = Type.Object({
+	mediaIds: Type.Array(Type.String()),
+});
+assert<
+	Equals<Static<typeof DownloadMediasReqBodyValidator>, DownloadMediasReqBody>
 >();

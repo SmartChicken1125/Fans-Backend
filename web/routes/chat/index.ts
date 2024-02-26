@@ -1,4 +1,11 @@
-import { SubscriptionStatus, UploadType } from "@prisma/client";
+import dinero from "dinero.js";
+import { DateTime } from "luxon";
+import {
+	SubscriptionStatus,
+	UploadType,
+	VideoCallStatus,
+	TransactionStatus,
+} from "@prisma/client";
 import { DEFAULT_PAGE_SIZE, isOutOfRange } from "../../../common/pagination.js";
 import CloudflareStreamService from "../../../common/service/CloudflareStreamService.js";
 import InboxManagerService, {
@@ -10,7 +17,8 @@ import PrismaService from "../../../common/service/PrismaService.js";
 import RPCManagerService from "../../../common/service/RPCManagerService.js";
 import SessionManagerService from "../../../common/service/SessionManagerService.js";
 import SnowflakeService from "../../../common/service/SnowflakeService.js";
-import { IMessage, MessageType } from "../../CommonAPISchemas.js";
+import { MeetingService } from "../../../common/service/MeetingService.js";
+import { IMessage, IVideoCall, MessageType } from "../../CommonAPISchemas.js";
 import APIErrors from "../../errors/index.js";
 import { ModelConverter } from "../../models/modelConverter.js";
 import { FastifyTypebox } from "../../types.js";
@@ -28,10 +36,12 @@ import {
 	ChatFansListRespBody,
 	ChatIdParams,
 	ChatNoteReqBody,
+	ChatPaidPostPriceReqQuery,
 	ChatUserIdParams,
 	ChatWSInfoRespBody,
 	CreateMessageReportReqBody,
 	MediasRespBody,
+	PurchaseChatPaidPostReqBody,
 } from "./schemas.js";
 import {
 	ChannelMediaPageQueryValidator,
@@ -42,9 +52,19 @@ import {
 	ChatFansListReqParamsValidator,
 	ChatIdParamsValidator,
 	ChatNoteReqBodyValidator,
+	ChatPaidPostPriceReqQueryValidator,
 	ChatUserIdParamsValidator,
 	CreateMessageReportReqBodyValidator,
+	PurchaseChatPaidPostReqBodyValidator,
 } from "./validation.js";
+import AuthorizeNetService from "../../../common/service/AuthorizeNetService.js";
+import FeesCalculator from "../../../common/service/FeesCalculatorService.js";
+import SiftService from "../../../common/service/SiftService.js";
+import { GetChimeReply } from "../videocall/meetings/schemas.js";
+import { TaxjarError } from "taxjar/dist/util/types.js";
+import { setInterval } from "node:timers/promises";
+
+const DECIMAL_TO_CENT_FACTOR = 100;
 
 export default async function routes(fastify: FastifyTypebox) {
 	const { container } = fastify;
@@ -52,10 +72,14 @@ export default async function routes(fastify: FastifyTypebox) {
 	const prisma = await container.resolve(PrismaService);
 	const snowflake = await container.resolve(SnowflakeService);
 	const sessionManager = await container.resolve(SessionManagerService);
+	const authorizeNetService = await container.resolve(AuthorizeNetService);
+	const feesCalculator = await container.resolve(FeesCalculator);
+	const siftService = await container.resolve(SiftService);
 	const rpc = await container.resolve(RPCManagerService);
 	const inboxManager = await container.resolve(InboxManagerService);
 	const cloudflareStream = await container.resolve(CloudflareStreamService);
 	const mediaUpload = await container.resolve(MediaUploadService);
+	const meetingService = await container.resolve(MeetingService);
 	const maxObjectLimit = parseInt(process.env.MAX_OBJECT_LIMIT ?? "100");
 
 	const chatWebSocketURL = process.env.PUBLIC_CHAT_WS_URL;
@@ -227,7 +251,12 @@ export default async function routes(fastify: FastifyTypebox) {
 		},
 	);
 
-	const validMessageTypes = [MessageType.TEXT, MessageType.MEDIA];
+	const validMessageTypes = [
+		MessageType.TEXT,
+		MessageType.MEDIA,
+		MessageType.GIF,
+		MessageType.PAID_POST,
+	];
 
 	// Sends a message to a conversation
 	fastify.post<{
@@ -299,6 +328,32 @@ export default async function routes(fastify: FastifyTypebox) {
 					gif: request.body.gif,
 					parentId: request.body.parentId,
 				};
+			} else if (messageType === MessageType.PAID_POST) {
+				if (!request.body.value) {
+					return reply.sendError(
+						APIErrors.INVALID_REQUEST("Missing 'value' payload"),
+					);
+				}
+
+				options = {
+					channelId,
+					userId: user.id,
+					messageType,
+					value: dinero({
+						amount: Math.round(
+							parseFloat(request.body.value) *
+								DECIMAL_TO_CENT_FACTOR,
+						),
+					}).getAmount(),
+					content: request.body.content,
+					uploadIds:
+						request.body.uploadIds?.map((s) => BigInt(s)) ?? [],
+					previewUploadIds:
+						request.body.previewUploadIds?.map((s) => BigInt(s)) ??
+						[],
+					status: TransactionStatus.Submitted,
+					parentId: request.body.parentId,
+				};
 			} else {
 				return reply.sendError(
 					APIErrors.INVALID_REQUEST("Invalid message type"),
@@ -308,6 +363,170 @@ export default async function routes(fastify: FastifyTypebox) {
 			const { payload } = await inboxManager.createMessage(options);
 
 			reply.send(payload);
+		},
+	);
+
+	// Start video call in a conversation
+	fastify.post<{
+		Params: ChatIdParams;
+		Reply: IVideoCall;
+	}>(
+		"/conversations/:id/calls",
+		{
+			schema: {
+				params: ChatIdParamsValidator,
+			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session!;
+			const user = await session.getUser(prisma);
+			const channelId = BigInt(request.params.id);
+
+			const channel = await inboxManager.getChannelParticipants(
+				channelId,
+				user.id,
+			);
+			if (!channel) {
+				return reply.sendError(APIErrors.CHANNEL_NOT_FOUND);
+			}
+
+			const existingCall = await prisma.videoCall.findFirst({
+				where: {
+					messageChannelId: BigInt(channelId),
+					status: VideoCallStatus.Started,
+				},
+			});
+			if (existingCall) {
+				return reply.sendError(APIErrors.VIDEO_CALL_IN_PROGRESS);
+			}
+
+			const participantIds = channel.participants.map(
+				(participant) => participant.userId,
+			);
+			const call = await meetingService.createVideoCall(
+				channelId,
+				participantIds,
+			);
+			if (!call) {
+				return reply.sendError(APIErrors.VIDEO_CALL_INTERNAL_ERROR);
+			}
+
+			const scheduledEndDate = DateTime.now()
+				.plus({ hour: 1 })
+				.toJSDate();
+			await meetingService.scheduleEndVideoCall(
+				call.id,
+				scheduledEndDate,
+			);
+
+			return reply.send(ModelConverter.toIVideoCall(call));
+		},
+	);
+
+	// Get current call in the conversation
+	fastify.get<{
+		Params: ChatIdParams;
+		Reply: IVideoCall;
+	}>(
+		"/conversations/:id/ongoing-call",
+		{
+			schema: {
+				params: ChatIdParamsValidator,
+			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session!;
+			const user = await session.getUser(prisma);
+			const channelId = BigInt(request.params.id);
+
+			const channel = await inboxManager.getChannelParticipants(
+				channelId,
+				user.id,
+			);
+			if (!channel) {
+				return reply.sendError(APIErrors.CHANNEL_NOT_FOUND);
+			}
+
+			const existingCall = await prisma.videoCall.findFirst({
+				where: {
+					messageChannelId: BigInt(channelId),
+					status: VideoCallStatus.Started,
+				},
+			});
+			if (!existingCall) {
+				return reply.send(undefined);
+			}
+
+			return reply.send(ModelConverter.toIVideoCall(existingCall));
+		},
+	);
+
+	// Get current call in the conversation
+	fastify.get<{
+		Params: ChatIdParams;
+		Reply: GetChimeReply;
+	}>(
+		"/conversations/:id/ongoing-call/session-configuration",
+		{
+			schema: {
+				params: ChatIdParamsValidator,
+			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session!;
+			const user = await session.getUser(prisma);
+			const channelId = BigInt(request.params.id);
+
+			const channel = await inboxManager.getChannelParticipants(
+				channelId,
+				user.id,
+			);
+			if (!channel) {
+				return reply.sendError(APIErrors.CHANNEL_NOT_FOUND);
+			}
+
+			const existingCall = await prisma.videoCall.findFirst({
+				where: {
+					messageChannelId: BigInt(channelId),
+					status: VideoCallStatus.Started,
+				},
+				include: { participants: true },
+			});
+			if (!existingCall) {
+				return reply.sendError(APIErrors.ITEM_NOT_FOUND("Video call"));
+			}
+
+			const participant = await prisma.videoCallParticipant.findFirst({
+				where: { userId: user.id, videoCallId: existingCall.id },
+			});
+			if (!participant) {
+				return reply.sendError(
+					APIErrors.ITEM_NOT_FOUND("Video call participant"),
+				);
+			}
+
+			const meeting = await meetingService.getChimeMeeting(existingCall);
+			const attendee = await meetingService.getChimeAttendee(
+				existingCall,
+				participant,
+			);
+
+			return reply.send({
+				Meeting: meeting?.Meeting,
+				Attendee: attendee?.Attendee,
+			});
 		},
 	);
 
@@ -881,6 +1100,457 @@ export default async function routes(fastify: FastifyTypebox) {
 			});
 
 			return reply.status(201).send();
+		},
+	);
+
+	fastify.get<{ Querystring: ChatPaidPostPriceReqQuery }>(
+		"/paid-post/price",
+		{
+			schema: {
+				querystring: ChatPaidPostPriceReqQueryValidator,
+			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session!;
+			const user = await session.getUser(prisma);
+
+			const { id, customerPaymentProfileId } = request.query;
+
+			let customerInformation;
+
+			if (customerPaymentProfileId) {
+				const paymentMethod = await prisma.paymentMethod.findFirst({
+					where: {
+						userId: user.id,
+						provider: "AuthorizeNet",
+					},
+				});
+
+				if (!paymentMethod) {
+					return reply.sendError(APIErrors.NO_PAYMENT_METHOD_FOUND);
+				}
+
+				const customerProfile =
+					await authorizeNetService.fetchCustomerProfile(
+						paymentMethod.token,
+					);
+
+				if (customerProfile.getMessages().getResultCode() !== "Ok") {
+					return reply.sendError(
+						APIErrors.PAYMENT_METHOD_FETCH_FAILED(
+							customerProfile
+								.getMessages()
+								.getMessage()[0]
+								.getText(),
+						),
+					);
+				}
+
+				const customerPaymentProfile =
+					customerProfile.profile.paymentProfiles.find(
+						(profile: any) =>
+							profile.customerPaymentProfileId ===
+							customerPaymentProfileId,
+					);
+
+				if (!customerPaymentProfile) {
+					return reply.sendError(APIErrors.PAYMENT_METHOD_NOT_FOUND);
+				}
+
+				if (!customerProfile) {
+					return reply.sendError(APIErrors.NO_PAYMENT_METHOD_FOUND);
+				}
+
+				customerInformation = {
+					country: customerPaymentProfile.billTo.country,
+					state: customerPaymentProfile.billTo.state,
+					city: customerPaymentProfile.billTo.city,
+					zip: customerPaymentProfile.billTo.zip,
+					address: customerPaymentProfile.billTo.address,
+				};
+			}
+
+			const message = await prisma.message.findFirst({
+				where: { id: BigInt(id) },
+			});
+
+			if (!message || !message.value) {
+				return reply.sendError(APIErrors.POST_NOT_FOUND);
+			}
+
+			const amountDinero = dinero({
+				amount: message.value,
+			});
+
+			const feesOutput = await feesCalculator.purchaseServiceFees(
+				amountDinero.getAmount(),
+				customerInformation,
+			);
+
+			if (feesOutput instanceof TaxjarError) {
+				return reply.sendError(
+					APIErrors.PAYMENT_FAILED(feesOutput.detail),
+				);
+			}
+
+			reply.send({
+				amount: feesOutput.amount.getAmount() / DECIMAL_TO_CENT_FACTOR,
+				platformFee:
+					feesOutput.platformFee.getAmount() / DECIMAL_TO_CENT_FACTOR,
+				vatFee: feesOutput.vatFee.getAmount() / DECIMAL_TO_CENT_FACTOR,
+				totalAmount:
+					feesOutput.totalAmount.getAmount() / DECIMAL_TO_CENT_FACTOR,
+			});
+		},
+	);
+
+	fastify.post<{ Body: PurchaseChatPaidPostReqBody }>(
+		"/paid-post/purchase",
+		{
+			schema: {
+				body: PurchaseChatPaidPostReqBodyValidator,
+			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+				authorizeNetService.webhookPrehandler,
+			],
+		},
+		async (request, reply) => {
+			const { messageId, customerPaymentProfileId, fanReferralCode } =
+				request.body;
+
+			const session = request.session!;
+			const user = await session.getUser(prisma);
+
+			const message = await prisma.message.findFirst({
+				where: { id: BigInt(messageId) },
+			});
+
+			if (!message || !message.value) {
+				return reply.sendError(APIErrors.POST_NOT_FOUND);
+			}
+
+			if (message.userId === user.id) {
+				return reply.sendError(APIErrors.PURCHASE_POST_SELF);
+			}
+
+			const alreadyPurchased =
+				await prisma.chatPaidPostTransaction.findFirst({
+					where: {
+						userId: user.id,
+						messageId: message.id,
+						OR: [
+							{
+								status: TransactionStatus.Successful,
+							},
+							{
+								AND: [
+									{
+										status: {
+											in: [
+												TransactionStatus.Initialized,
+												TransactionStatus.Submitted,
+											],
+										},
+									},
+									{
+										createdAt: {
+											gte: new Date(
+												Date.now() - 5 * 60 * 1000,
+											).toISOString(),
+										},
+									},
+								],
+							},
+						],
+					},
+				});
+
+			if (alreadyPurchased) {
+				return reply.sendError(APIErrors.POST_ALREADY_PURCHASED);
+			}
+
+			const paymentMethod = await prisma.paymentMethod.findFirst({
+				where: {
+					userId: user.id,
+					provider: "AuthorizeNet",
+				},
+			});
+
+			if (!paymentMethod) {
+				return reply.sendError(APIErrors.NO_PAYMENT_METHOD_FOUND);
+			}
+
+			const customerProfile =
+				await authorizeNetService.fetchCustomerProfile(
+					paymentMethod.token,
+				);
+
+			if (customerProfile.getMessages().getResultCode() !== "Ok") {
+				return reply.sendError(
+					APIErrors.PAYMENT_METHOD_FETCH_FAILED(
+						customerProfile.getMessages().getMessage()[0].getText(),
+					),
+				);
+			}
+
+			const customerPaymentProfile =
+				customerProfile.profile.paymentProfiles.find(
+					(profile: any) =>
+						profile.customerPaymentProfileId ===
+						customerPaymentProfileId,
+				);
+
+			if (!customerPaymentProfile) {
+				return reply.sendError(APIErrors.PAYMENT_METHOD_NOT_FOUND);
+			}
+
+			if (!customerProfile) {
+				return reply.sendError(APIErrors.NO_PAYMENT_METHOD_FOUND);
+			}
+
+			const customerInformation = {
+				country: customerPaymentProfile.billTo.country,
+				state: customerPaymentProfile.billTo.state,
+				city: customerPaymentProfile.billTo.city,
+				zip: customerPaymentProfile.billTo.zip,
+				address: customerPaymentProfile.billTo.address,
+			};
+
+			const amountDinero = dinero({
+				amount: message.value,
+			});
+
+			const feesOutput = await feesCalculator.purchaseServiceFees(
+				amountDinero.getAmount(),
+				customerInformation,
+			);
+
+			if (feesOutput instanceof TaxjarError) {
+				return reply.sendError(
+					APIErrors.PAYMENT_FAILED(feesOutput.detail),
+				);
+			}
+
+			const creator = await prisma.profile.findUnique({
+				where: { userId: message.userId },
+			});
+
+			if (!creator) {
+				return reply.sendError(APIErrors.PROFILE_NOT_FOUND);
+			}
+
+			const chatPaidPostTransaction =
+				await prisma.chatPaidPostTransaction.create({
+					data: {
+						id: snowflake.gen(),
+						userId: user.id,
+						creatorId: creator.id,
+						messageId: message.id,
+						paymentMethodId: paymentMethod.id,
+						paymentProfileId:
+							customerPaymentProfile.customerPaymentProfileId,
+
+						provider: "AuthorizeNet",
+						amount: feesOutput.amount.getAmount(),
+						processingFee: 0,
+						platformFee: feesOutput.platformFee.getAmount(),
+						vatFee: feesOutput.vatFee.getAmount(),
+						status: "Initialized",
+						fanReferralCode: fanReferralCode,
+					},
+				});
+
+			const siftTransaction = async (
+				status: "$success" | "$failure" | "$pending",
+				orderId?: string,
+			) => {
+				return await siftService.transaction({
+					$user_id: user.id.toString(),
+					$user_email: user.email,
+					$amount: feesOutput.totalAmount.getAmount() * 10000,
+					$currency_code: "USD",
+					$order_id: orderId,
+					$transaction_id: chatPaidPostTransaction.id.toString(),
+					$transaction_type: "$sale",
+					$transaction_status: status,
+					$ip: request.ip,
+					$seller_user_id: message.userId.toString(),
+					$billing_address: {
+						$name:
+							customerPaymentProfile.billTo.firstName +
+							" " +
+							customerPaymentProfile.billTo.lastName,
+						$address_1: customerPaymentProfile.billTo.address,
+						$city: customerPaymentProfile.billTo.city,
+						$region: customerPaymentProfile.billTo.state,
+						$country: customerPaymentProfile.billTo.country,
+						$zipcode: customerPaymentProfile.billTo.zip,
+					},
+					$payment_method: {
+						$payment_type: "$credit_card",
+						$payment_gateway: "$authorizenet",
+						$account_holder_name:
+							customerPaymentProfile.billTo.firstName +
+							" " +
+							customerPaymentProfile.billTo.lastName,
+						$card_last4:
+							customerPaymentProfile.payment.creditCard.cardNumber.slice(
+								-4,
+							),
+						$verification_status: "$success",
+					},
+					$browser: {
+						$user_agent: request.headers["user-agent"] ?? "",
+						$accept_language:
+							request.headers["accept-language"] ?? "",
+					},
+				});
+			};
+
+			const response = await siftTransaction("$pending");
+
+			const hasBadPaymentAbuseDecision =
+				response.score_response.workflow_statuses.some((workflow) =>
+					workflow.history.some(
+						(historyItem) =>
+							historyItem.config.decision_id ===
+							"looks_bad_payment_abuse",
+					),
+				);
+
+			if (hasBadPaymentAbuseDecision) {
+				await prisma.chatPaidPostTransaction.update({
+					where: { id: chatPaidPostTransaction.id },
+					data: {
+						status: "Failed",
+						error: "Transaction flagged as fraudulent.",
+					},
+				});
+
+				await siftTransaction("$failure");
+
+				return reply.sendError(
+					APIErrors.PAYMENT_FAILED(
+						"Failed because of fraud detection, if you believe this is an error contact support.",
+					),
+				);
+			}
+
+			const paymentResponse =
+				await authorizeNetService.createPaymentTransaction({
+					customerProfileId: paymentMethod.token,
+					customerPaymentProfileId:
+						customerPaymentProfile.customerPaymentProfileId,
+					description: `Chat Paid Post: ${message.id}`,
+					amount:
+						feesOutput.totalAmount.getAmount() /
+						DECIMAL_TO_CENT_FACTOR,
+					merchantData: {
+						userId: user.id.toString(),
+						transactionId: chatPaidPostTransaction.id.toString(),
+					},
+				});
+
+			if (paymentResponse.getMessages().getResultCode() !== "Ok") {
+				await prisma.chatPaidPostTransaction.update({
+					where: { id: chatPaidPostTransaction.id },
+					data: {
+						status: "Failed",
+						error: paymentResponse
+							.getMessages()
+							.getMessage()[0]
+							.getText(),
+					},
+				});
+
+				await siftTransaction(
+					"$failure",
+					paymentResponse.transactionResponse.transId,
+				);
+
+				return reply.sendError(
+					APIErrors.PAYMENT_FAILED(
+						paymentResponse.getMessages().getMessage()[0].getText(),
+					),
+				);
+			}
+
+			if (paymentResponse.getTransactionResponse().getErrors()) {
+				await prisma.chatPaidPostTransaction.update({
+					where: { id: chatPaidPostTransaction.id },
+					data: {
+						status: "Failed",
+						error: paymentResponse
+							.getTransactionResponse()
+							.getErrors()
+							.getError()[0]
+							.getErrorText(),
+					},
+				});
+
+				await siftTransaction(
+					"$failure",
+					paymentResponse.transactionResponse.transId,
+				);
+
+				return reply.sendError(
+					APIErrors.PAYMENT_FAILED(
+						paymentResponse
+							.getTransactionResponse()
+							.getErrors()
+							.getError()[0]
+							.getErrorText(),
+					),
+				);
+			}
+
+			await prisma.chatPaidPostTransaction.update({
+				where: { id: chatPaidPostTransaction.id },
+				data: {
+					status: "Submitted",
+					transactionId: paymentResponse
+						.getTransactionResponse()
+						?.getTransId(),
+				},
+			});
+
+			const POLL_INTERVAL = 1000;
+			const MAX_DURATION = 45000;
+
+			const startTime = Date.now();
+
+			for await (const _ of setInterval(POLL_INTERVAL)) {
+				const paidPostTransactionStatus =
+					await prisma.chatPaidPostTransaction.findUnique({
+						where: { id: chatPaidPostTransaction.id },
+						select: { status: true },
+					});
+
+				if (
+					paidPostTransactionStatus?.status ===
+					TransactionStatus.Successful
+				) {
+					clearInterval(POLL_INTERVAL);
+					return reply.send({
+						message: "Post purchased successfully!",
+					});
+				}
+
+				if (Date.now() - startTime > MAX_DURATION) {
+					clearInterval(POLL_INTERVAL);
+					return reply.sendError(
+						APIErrors.PAYMENT_FAILED(
+							"Transaction processing took too long. Please check back later.",
+						),
+					);
+				}
+			}
 		},
 	);
 }

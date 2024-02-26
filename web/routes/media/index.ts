@@ -1,4 +1,5 @@
 import {
+	SubscriptionStatus,
 	TransactionStatus,
 	UploadStorageType,
 	UploadType,
@@ -29,6 +30,7 @@ import {
 	resolveAuthenticatedMediaURL,
 } from "../../utils/UploadUtils.js";
 import {
+	DownloadMediasReqBody,
 	FinishUploadReqBody,
 	GeneratePresignedUrlReqBody,
 	MediaRespBody,
@@ -37,15 +39,19 @@ import {
 	MediasRespBody,
 	PostMediaPageQuery,
 	PresignedUrlRespBody,
+	SortType,
 	TusUploadReqBody,
 	TusUploadRespBody,
 } from "./schemas.js";
 import {
+	DownloadMediasReqBodyValidator,
 	GeneratePresignedUrlReqBodyValidator,
 	MediaTypeParamValidator,
 	PostMediaPageQueryValidator,
 	TusUploadReqBodyValidator,
 } from "./validation.js";
+import { ReadableStream } from "stream/web";
+import { Readable } from "stream";
 
 export default async function routes(fastify: FastifyTypebox) {
 	const { container } = fastify;
@@ -186,7 +192,12 @@ export default async function routes(fastify: FastifyTypebox) {
 			],
 		},
 		async (request, reply) => {
-			const { page = 1, size = DEFAULT_PAGE_SIZE, type } = request.query;
+			const {
+				sort = SortType.latest,
+				page = 1,
+				size = DEFAULT_PAGE_SIZE,
+				type,
+			} = request.query;
 			const session = request.session!;
 			const profile = (await session.getProfile(prisma))!;
 			const [imageTotal, videoTotal] = await Promise.all([
@@ -247,7 +258,10 @@ export default async function routes(fastify: FastifyTypebox) {
 						},
 					},
 				},
-				orderBy: [{ isPinned: "desc" }, { updatedAt: "desc" }],
+				orderBy: [
+					{ isPinned: "desc" },
+					{ updatedAt: sort === SortType.latest ? "desc" : "asc" },
+				],
 				take: size,
 				skip: (page - 1) * size,
 			});
@@ -301,8 +315,11 @@ export default async function routes(fastify: FastifyTypebox) {
 				return reply.sendError(APIErrors.ITEM_NOT_FOUND("Profile"));
 			}
 
-			const session = request.session!;
+			const session = request.session;
 			if (session) {
+				const requestingUser =
+					(await session.getUserWithProfile(prisma))!;
+				const isSelf = requestingUser.profile?.id === profile.id;
 				const paidPostTransactions =
 					await prisma.paidPostTransaction.findMany({
 						where: {
@@ -317,54 +334,84 @@ export default async function routes(fastify: FastifyTypebox) {
 					(ppt) => ppt.paidPost.postId,
 				);
 
-				const requestingUser = (await session.getUser(prisma))!;
-
-				const userLevel = await prisma.userLevel.findFirst({
-					where: {
-						creatorId: BigInt(profile.id),
-						userId: BigInt(requestingUser.id),
-					},
-				});
-
 				const postCondition = {
 					profileId: profile.id,
 					isArchived: false,
 					isPosted: true,
-					AND: [
-						{
-							OR: [
-								{ isPaidPost: false },
+					AND: isSelf
+						? undefined
+						: [
 								{
-									isPaidPost: true,
-									id: { in: paidOutPostIds },
-								},
-							],
-						},
-						{
-							OR: [
-								{
-									roles: {
-										none: {},
-									},
+									OR: [
+										{ isPaidPost: false },
+										{
+											isPaidPost: true,
+											id: { in: paidOutPostIds },
+										},
+									],
 								},
 								{
-									roles:
-										requestingUser.id != BigInt(userId)
-											? {
-													some: {
-														role: {
-															id: BigInt(
-																userLevel?.roleId ||
-																	0,
-															),
+									OR: [
+										{
+											AND: [
+												{
+													roles: {
+														none: {},
+													},
+													tiers: {
+														none: {},
+													},
+													users: {
+														none: {},
+													},
+												},
+											],
+										},
+										{
+											roles: {
+												some: {
+													role: {
+														userLevels: {
+															some: {
+																userId: BigInt(
+																	requestingUser.id,
+																),
+															},
 														},
 													},
-											  }
-											: undefined,
+												},
+											},
+										},
+										{
+											tiers: {
+												some: {
+													tier: {
+														paymentSubscriptions: {
+															some: {
+																userId: BigInt(
+																	requestingUser.id,
+																),
+																status: SubscriptionStatus.Active,
+															},
+														},
+													},
+												},
+											},
+										},
+										{
+											users: {
+												some: {
+													user: {
+														id: BigInt(
+															requestingUser.id,
+														),
+													},
+												},
+											},
+										},
+									],
 								},
-							],
-						},
-					],
+						  ],
 				};
 
 				const [imageTotal, videoTotal] = await Promise.all([
@@ -544,6 +591,9 @@ export default async function routes(fastify: FastifyTypebox) {
 		UploadUsageType.CHAT,
 		UploadUsageType.POST,
 		UploadUsageType.CUSTOM_VIDEO,
+		UploadUsageType.VIDEO_CALL_PREVIEW,
+		UploadUsageType.CUSTOM_VIDEO_PREVIEW,
+		UploadUsageType.CUSTOM_VIDEO_REQUEST,
 	];
 
 	fastify.post<{
@@ -824,6 +874,55 @@ export default async function routes(fastify: FastifyTypebox) {
 
 			const result: MediaRespBody = ModelConverter.toIMedia(updatedMedia);
 			return reply.status(200).send(result);
+		},
+	);
+
+	fastify.post<{
+		Body: DownloadMediasReqBody;
+	}>(
+		"/download",
+		{
+			schema: {
+				body: DownloadMediasReqBodyValidator,
+			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+				sessionManager.requireProfileHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session!;
+			const profile = (await session.getProfile(prisma))!;
+			const { mediaIds } = request.body;
+			const allMedias = await prisma.upload.findMany({
+				where: { userId: BigInt(session.userId) },
+			});
+
+			if (
+				mediaIds.some(
+					(mi) =>
+						allMedias.findIndex((m) => m.id.toString() === mi) ===
+						-1,
+				)
+			) {
+				return reply.sendError(APIErrors.PERMISSION_ERROR);
+			}
+
+			const medias = await prisma.upload.findMany({
+				where: {
+					userId: BigInt(session.userId),
+					id: { in: mediaIds.map((mi) => BigInt(mi)) },
+				},
+			});
+
+			if (medias.length > 0) {
+				const mfStream = await mediaUpload.getMultiFilesStream(medias);
+				await mfStream.finalize();
+				return reply.send(mfStream);
+			} else {
+				return reply.send("no data");
+			}
 		},
 	);
 }

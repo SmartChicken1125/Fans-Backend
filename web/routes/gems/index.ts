@@ -417,16 +417,12 @@ export default async function routes(
 					);
 				}
 
-				try {
-					await xpService.addXPLog(
-						"Donate",
-						amount.getAmount(),
-						user.id,
-						creator.id,
-					);
-				} catch (error) {
-					console.error("XP Error", error);
-				}
+				await xpService.addXPLog(
+					"Donate",
+					amount.getAmount(),
+					user.id,
+					creator.id,
+				);
 			}
 
 			await payoutService.processPayout(creator.id).catch(() => void 0);
@@ -2143,16 +2139,12 @@ export default async function routes(
 							);
 						}
 
-						try {
-							await xpService.addXPLog(
-								"Subscribe",
-								paymentSubscription.amount,
-								paymentSubscription.userId,
-								paymentSubscription.creatorId,
-							);
-						} catch (error) {
-							console.error("XP Error", error);
-						}
+						await xpService.addXPLog(
+							"Subscribe",
+							paymentSubscription.amount,
+							paymentSubscription.userId,
+							paymentSubscription.creatorId,
+						);
 
 						await payoutService
 							.processPayout(paymentSubscription.creatorId)
@@ -2322,6 +2314,7 @@ export default async function routes(
 				const [
 					gemTransaction,
 					paidPostTransaction,
+					chatPaidPostTransaction,
 					cameoPayment,
 					videoCallPurchase,
 				] = await Promise.all([
@@ -2343,6 +2336,20 @@ export default async function routes(
 							user: { select: { email: true } },
 							creator: true,
 							creatorId: true,
+							amount: true,
+							status: true,
+							fanReferralCode: true,
+						},
+					}),
+					prisma.chatPaidPostTransaction.findUnique({
+						where: { transactionId: refTransId },
+						select: {
+							id: true,
+							userId: true,
+							user: { select: { email: true } },
+							creator: true,
+							creatorId: true,
+							messageId: true,
 							amount: true,
 							status: true,
 							fanReferralCode: true,
@@ -2377,6 +2384,7 @@ export default async function routes(
 				if (
 					!gemTransaction &&
 					!paidPostTransaction &&
+					!chatPaidPostTransaction &&
 					!cameoPayment &&
 					!videoCallPurchase
 				) {
@@ -2685,16 +2693,12 @@ export default async function routes(
 								}
 							})();
 
-							try {
-								await xpService.addXPLog(
-									"Purchase",
-									paidPostTransaction.amount,
-									paidPostTransaction.userId,
-									paidPostTransaction.creatorId,
-								);
-							} catch (error) {
-								console.error("XP Error", error);
-							}
+							await xpService.addXPLog(
+								"Purchase",
+								paidPostTransaction.amount,
+								paidPostTransaction.userId,
+								paidPostTransaction.creatorId,
+							);
 						}
 					}
 
@@ -2751,6 +2755,269 @@ export default async function routes(
 							id: paidPostTransaction.userId.toString(),
 						});
 					}
+				} else if (chatPaidPostTransaction) {
+					if (status) {
+						await prisma.popupStatus.upsert({
+							where: { userId: chatPaidPostTransaction.userId },
+							update: {
+								showNoticeChargeBackDialog:
+									status === TransactionStatus.Disputed,
+							},
+
+							create: {
+								id: snowflake.gen(),
+								userId: chatPaidPostTransaction.userId,
+								showNoticeChargeBackDialog:
+									status === TransactionStatus.Disputed,
+							},
+						});
+
+						await prisma.chatPaidPostTransaction.update({
+							where: { id: chatPaidPostTransaction.id },
+							data: { status: status },
+						});
+
+						await prisma.message.update({
+							where: { id: chatPaidPostTransaction.messageId },
+							data: { status: status },
+						});
+
+						if (
+							status === TransactionStatus.Successful &&
+							chatPaidPostTransaction.status !==
+								TransactionStatus.Successful
+						) {
+							await prisma.$transaction(async (prisma) => {
+								const creatorBalance =
+									await prisma.balance.findFirst({
+										where: {
+											profileId:
+												chatPaidPostTransaction.creatorId,
+										},
+									});
+								const fanReferral =
+									chatPaidPostTransaction.fanReferralCode
+										? await prisma.fanReferral.findFirst({
+												where: {
+													code: chatPaidPostTransaction.fanReferralCode,
+												},
+												include: { profile: true },
+										  })
+										: undefined;
+								const [
+									fanReferrerGemsBalance,
+									fanReferrerBalance,
+								] = [
+									await prisma.gemsBalance.findFirst({
+										where: { userId: fanReferral?.userId },
+									}),
+									await prisma.balance.findFirst({
+										where: {
+											profile: {
+												userId: fanReferral?.userId,
+											},
+										},
+									}),
+								];
+
+								const { netAmount } =
+									feesCalculator.creatorPaidPostTransactionFee(
+										chatPaidPostTransaction.amount,
+										chatPaidPostTransaction.creator
+											.platformFee,
+									);
+
+								if (
+									chatPaidPostTransaction.fanReferralCode &&
+									fanReferral
+								) {
+									const fanReferralAmount =
+										netAmount.getAmount() *
+										fanReferral.profile.fanReferralShare;
+									if (fanReferrerBalance) {
+										await prisma.balance.update({
+											where: {
+												id: fanReferrerBalance.id,
+											},
+											data: {
+												amount: {
+													increment:
+														fanReferralAmount,
+												},
+											},
+										});
+									} else {
+										await prisma.gemsBalance.update({
+											where: {
+												id: fanReferrerGemsBalance?.id,
+											},
+											data: {
+												amount: {
+													increment:
+														fanReferralAmount,
+												},
+											},
+										});
+									}
+
+									await prisma.balance.update({
+										where: { id: creatorBalance?.id },
+										data: {
+											amount: {
+												increment:
+													netAmount.getAmount() -
+													fanReferralAmount,
+											},
+										},
+									});
+
+									await prisma.fanReferralTransaction.create({
+										data: {
+											id: snowflake.gen(),
+											referentId:
+												chatPaidPostTransaction.userId,
+											referrerId: fanReferral.userId,
+											creatorId:
+												chatPaidPostTransaction.creatorId,
+											fanReferralId: fanReferral.id,
+											type: FanReferralTransactionType.PaidPost,
+											transactionId:
+												chatPaidPostTransaction.id,
+											amount: fanReferralAmount,
+										},
+									});
+
+									await prisma.fanReferral.update({
+										where: { id: fanReferral.id },
+										data: { visitCount: { increment: 1 } },
+									});
+								} else {
+									await prisma.balance.update({
+										where: { id: creatorBalance?.id },
+										data: {
+											amount: {
+												increment:
+													netAmount.getAmount(),
+											},
+										},
+									});
+								}
+							});
+
+							const creator = await prisma.profile.findFirst({
+								where: {
+									id: chatPaidPostTransaction.creatorId,
+								},
+							});
+							if (creator?.referrerCode) {
+								await processCreatorReferralFee(
+									creator.referrerCode,
+									creator.id.toString(),
+									"PaidPost",
+									chatPaidPostTransaction.amount,
+									chatPaidPostTransaction.id.toString(),
+								);
+							}
+							(async () => {
+								const creator = await prisma.profile.findUnique(
+									{
+										where: {
+											id: chatPaidPostTransaction.creatorId,
+										},
+										select: {
+											userId: true,
+											notificationsSettings: true,
+										},
+									},
+								);
+
+								if (!creator) return;
+
+								const dineroAmount = dinero({
+									amount: chatPaidPostTransaction.amount,
+								});
+
+								if (
+									creator.notificationsSettings
+										?.paidPostCreatorInApp
+								) {
+									await notification.createNotification(
+										creator.userId,
+										{
+											type: NotificationType.PaidPostPurchase,
+											users: [
+												chatPaidPostTransaction.userId,
+											],
+											price: formatPriceForNotification(
+												dineroAmount,
+											),
+										},
+									);
+								}
+							})();
+
+							await xpService.addXPLog(
+								"Purchase",
+								chatPaidPostTransaction.amount,
+								chatPaidPostTransaction.userId,
+								chatPaidPostTransaction.creatorId,
+							);
+						}
+					}
+
+					if (status === TransactionStatus.Successful) {
+						await siftTransaction(
+							chatPaidPostTransaction.id.toString(),
+							{
+								id: chatPaidPostTransaction.userId.toString(),
+								email: chatPaidPostTransaction.user.email,
+							},
+							"$sale",
+							chatPaidPostTransaction.amount,
+							"$success",
+							{
+								id: chatPaidPostTransaction.creatorId.toString(),
+							},
+						);
+					}
+
+					if (status === TransactionStatus.Failed) {
+						await siftTransaction(
+							chatPaidPostTransaction.id.toString(),
+							{
+								id: chatPaidPostTransaction.userId.toString(),
+								email: chatPaidPostTransaction.user.email,
+							},
+							"$sale",
+							chatPaidPostTransaction.amount,
+							"$failure",
+							{
+								id: chatPaidPostTransaction.creatorId.toString(),
+							},
+						);
+					}
+
+					if (status === TransactionStatus.Refunded) {
+						await siftTransaction(
+							chatPaidPostTransaction.id.toString(),
+							{
+								id: chatPaidPostTransaction.userId.toString(),
+								email: chatPaidPostTransaction.user.email,
+							},
+							"$refund",
+							chatPaidPostTransaction.amount,
+							"$success",
+							{
+								id: chatPaidPostTransaction.creatorId.toString(),
+							},
+						);
+					}
+
+					if (status === TransactionStatus.Disputed) {
+						await siftChargeback({
+							id: chatPaidPostTransaction.userId.toString(),
+						});
+					}
 				} else if (cameoPayment) {
 					if (status) {
 						await prisma.popupStatus.upsert({
@@ -2800,16 +3067,12 @@ export default async function routes(
 								});
 							});
 
-							try {
-								await xpService.addXPLog(
-									"Purchase",
-									cameoPayment.amount,
-									cameoPayment.userId,
-									cameoPayment.creatorId,
-								);
-							} catch (error) {
-								console.error("XP Error", error);
-							}
+							await xpService.addXPLog(
+								"Purchase",
+								cameoPayment.amount,
+								cameoPayment.userId,
+								cameoPayment.creatorId,
+							);
 						}
 					}
 
@@ -2918,16 +3181,12 @@ export default async function routes(
 								});
 							});
 
-							try {
-								await xpService.addXPLog(
-									"Purchase",
-									videoCallPurchase.amount,
-									videoCallPurchase.fanId,
-									videoCallPurchase.creatorId,
-								);
-							} catch (error) {
-								console.error("XP Error", error);
-							}
+							await xpService.addXPLog(
+								"Purchase",
+								videoCallPurchase.amount,
+								videoCallPurchase.fanId,
+								videoCallPurchase.creatorId,
+							);
 						}
 					}
 

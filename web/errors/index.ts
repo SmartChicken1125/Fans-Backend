@@ -17,6 +17,7 @@ import { userAPIErrors } from "./user.js";
 import { pollAPIErrors } from "./poll.js";
 import { videocallAPIErrors } from "./videocall.js";
 import { cameoAPIErrors } from "./cameo.js";
+import { blockUserAPIErrors } from "./blockUser.js";
 import { reviewAPIErrors } from "./review.js";
 
 const APIErrors = {
@@ -38,6 +39,7 @@ const APIErrors = {
 	...pollAPIErrors,
 	...videocallAPIErrors,
 	...cameoAPIErrors,
+	...blockUserAPIErrors,
 	...reviewAPIErrors,
 };
 

@@ -1,4 +1,5 @@
 import { Logger } from "pino";
+import { CameoSettingsProgress } from "@prisma/client";
 import { FastifyTypebox } from "../../types.js";
 import SessionManagerService, {
 	Session,
@@ -8,6 +9,8 @@ import APIErrors from "../../errors/index.js";
 import { ModelConverter } from "../../models/modelConverter.js";
 import { IdParams } from "../../../common/validators/schemas.js";
 import { IdParamsValidator } from "../../../common/validators/validation.js";
+import CloudflareStreamService from "../../../common/service/CloudflareStreamService.js";
+import MediaUploadService from "../../../common/service/MediaUploadService.js";
 import { CameoProfile } from "./schemas.js";
 
 export default async function routes(fastify: FastifyTypebox) {
@@ -16,6 +19,8 @@ export default async function routes(fastify: FastifyTypebox) {
 	const logger = await container.resolve<Logger>("logger");
 	const sessionManager = await container.resolve(SessionManagerService);
 	const prisma = await container.resolve(PrismaService);
+	const cloudflareStream = await container.resolve(CloudflareStreamService);
+	const mediaService = await container.resolve(MediaUploadService);
 
 	fastify.get<{
 		Reply: CameoProfile;
@@ -48,7 +53,26 @@ export default async function routes(fastify: FastifyTypebox) {
 				.map(ModelConverter.toICameoDuration)
 				.map(({ id, isEnabled, ...duration }) => duration);
 			const isAvailable =
-				settings.customVideoEnabled && !!durations.length;
+				settings.progress === CameoSettingsProgress.Completed &&
+				settings.customVideoEnabled &&
+				!!durations.length;
+			if (!isAvailable) {
+				return reply.sendError(APIErrors.CAMEO_SETTINGS_NOT_FOUND);
+			}
+
+			const uploads = await prisma.customVideoPreviewUpload.findMany({
+				where: { profileId: BigInt(request.params.id) },
+				include: { upload: true },
+			});
+
+			const previews = await Promise.all(
+				uploads.map((upload) =>
+					ModelConverter.toIMediaVideoUpload(
+						cloudflareStream,
+						mediaService,
+					)(upload.upload),
+				),
+			);
 
 			return reply.send({
 				description: settings.description || "",
@@ -56,7 +80,8 @@ export default async function routes(fastify: FastifyTypebox) {
 				contentTypes: settings.contentTypes,
 				customContentType: settings.customContentType || "",
 				customVideoDurations,
-				isAvailable,
+				fulfillmentTime: settings.fulfillmentTime,
+				previews,
 			});
 		},
 	);

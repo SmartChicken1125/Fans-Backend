@@ -51,6 +51,15 @@ export default async function routes(fastify: FastifyTypebox) {
 				const { page = 1, size = DEFAULT_PAGE_SIZE } = query;
 				const session = request.session!;
 				const profile = (await session.getProfile(prisma))!;
+
+				const total = await prisma.category.count({
+					where: { profileId: profile.id },
+					orderBy: { order: "asc" },
+				});
+
+				if (isOutOfRange(page, size, total)) {
+					return reply.sendError(APIErrors.OUT_OF_RANGE);
+				}
 				const categories = await prisma.category.findMany({
 					where: { profileId: profile.id },
 					include: {
@@ -73,6 +82,9 @@ export default async function routes(fastify: FastifyTypebox) {
 							ModelConverter.toIRole(r.role),
 						),
 					})),
+					page,
+					size,
+					total,
 				};
 				return reply.send(result);
 			} catch (err) {

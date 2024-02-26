@@ -1,4 +1,5 @@
 import { CameoContentType } from "@prisma/client";
+import { IMediaVideoUpload } from "../../CommonAPISchemas.js";
 
 export interface CameoProfileDuration {
 	length: number;
@@ -11,6 +12,7 @@ export interface CameoProfile {
 	sexualContentEnabled: boolean;
 	contentTypes: (typeof CameoContentType)[keyof typeof CameoContentType][];
 	customContentType: string;
-	isAvailable: boolean;
 	customVideoDurations: CameoProfileDuration[];
+	fulfillmentTime: number | null; // hours
+	previews: IMediaVideoUpload[];
 }

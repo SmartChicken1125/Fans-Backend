@@ -17,7 +17,7 @@ export type CampaignType = (typeof campaignTypes)[number];
 const promotionTypes = ["Free_Trial", "Discount"] as const;
 export type PromotionType = (typeof promotionTypes)[number];
 
-const uploadTypes = ["Video", "Image", "Audio", "Form"] as const;
+const uploadTypes = ["Video", "Image", "Audio", "Form", "Report"] as const;
 export type UploadType = (typeof uploadTypes)[number];
 
 const postTypes = [
@@ -52,6 +52,18 @@ export type MeetingType = (typeof meetingTypes)[number];
 const meetingStatuses = ["Pending", "Accepted", "Declined", "Cancelled"];
 export type MeetingStatusType = (typeof meetingStatuses)[number];
 
+const meetingSettingsProgressTypes = [
+	"None",
+	"Pricing",
+	"Availability",
+	"Content",
+	"Description",
+	"Notifications",
+	"Completed",
+] as const;
+export type MeetingSettingsProgressType =
+	(typeof meetingSettingsProgressTypes)[number];
+
 const customVideoStatuses = [
 	"Pending",
 	"Accepted",
@@ -63,6 +75,18 @@ export type CustomVideoStatusType = (typeof customVideoStatuses)[number];
 
 const pronouns = ["He", "She", "They"] as const;
 export type PronounType = (typeof pronouns)[number];
+
+const cameoSettingsProgressTypes = [
+	"None",
+	"Pricing",
+	"Content",
+	"RequestLimits",
+	"Description",
+	"Notifications",
+	"Completed",
+] as const;
+export type CameoSettingsProgressType =
+	(typeof cameoSettingsProgressTypes)[number];
 
 const ageVerifyStatus = [
 	"PENDING",
@@ -208,6 +232,10 @@ export interface IUser {
 	ageVerifyStatus?: AgeVerifyStatus;
 	isShowProfile?: boolean;
 	isOlderThan18?: boolean;
+}
+
+export interface IFan extends IUser {
+	level: IUserLevel;
 }
 
 export interface IUserBasic {
@@ -468,6 +496,7 @@ export interface IPoll {
 	isPublic: boolean;
 	updatedAt: string;
 	answers?: IPollAnswer[];
+	isVoted?: boolean;
 }
 
 export interface IPollAnswer {
@@ -583,6 +612,7 @@ export interface IProfile {
 	updatedAt: string;
 	activeStories?: IStory[];
 	isDisplayShop: boolean;
+	isAllowedScreenshot?: boolean;
 	isDisplayReview: boolean;
 }
 
@@ -669,6 +699,18 @@ export interface IStory {
 	shareCount: number;
 	storyTags: IStoryTag[];
 	storyUrls: IStoryUrl[];
+	storyTexts: IStoryText[];
+}
+
+export interface IStoryText {
+	id: string;
+	storyId: string;
+	text: string;
+	color?: string;
+	font?: string;
+	pointX: number;
+	pointY: number;
+	updatedAt: string;
 }
 
 export interface IStoryUrl {
@@ -732,6 +774,7 @@ export interface IUserReport {
 	flag: ProfileReportFlag;
 	status: ReportStatus;
 	reason?: string;
+	thumbUrl?: string;
 	createdAt: string;
 	updatedAt: string;
 }
@@ -793,11 +836,17 @@ export interface IMessage {
 	content: string;
 	emoji?: number;
 	media?: Media[];
-	previewImages?: string;
-	value?: number;
-	status?: string;
+	previewMedia?: Media[];
+	value?: number | null;
+	status?: TransactionStatus | null;
 	parentId?: string;
 	parentMessage?: IMessage;
+}
+
+export interface IVideoCall {
+	id: string;
+	channelId: string;
+	createdAt: string;
 }
 
 export interface PaymentMethod {
@@ -1062,7 +1111,9 @@ export interface ICameoDuration {
 export interface ICameoOrder {
 	id: string;
 	fanId: string;
+	fan?: IUser;
 	creatorId: string;
+	creator?: IProfile;
 	recipientName: string;
 	recipientPronoun: PronounType | undefined;
 	status: CustomVideoStatusType;
@@ -1073,7 +1124,9 @@ export interface ICameoOrder {
 	review: string;
 	score: number | undefined;
 	dueDate: Date;
-	video: { url: string; thumbnail?: string | undefined } | undefined;
+	createdAt: Date;
+	mediaRequests?: IMediaImageVideoUpload[];
+	mediaResponses?: IMediaVideoUpload[];
 }
 
 export interface IReview {
@@ -1095,4 +1148,21 @@ export interface IPostMediaTag {
 	pointX: number;
 	pointY: number;
 	updatedAt: string;
+}
+
+export interface IMediaImageVideoUpload {
+	image?: IUpload;
+	video?: {
+		id: string;
+		url: string;
+		thumbnail?: string;
+	};
+}
+
+export interface IMediaVideoUpload {
+	video: {
+		id: string;
+		url: string;
+		thumbnail?: string;
+	};
 }

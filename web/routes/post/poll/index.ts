@@ -34,6 +34,7 @@ export default async function routes(fastify: FastifyTypebox) {
 			],
 		},
 		async (request, reply) => {
+			const session = request.session!;
 			const { id } = request.params;
 			const row = await prisma.poll.findFirst({
 				where: { id: BigInt(id) },
@@ -44,6 +45,7 @@ export default async function routes(fastify: FastifyTypebox) {
 					},
 					pollAnswers: {
 						include: {
+							pollVotes: true,
 							_count: {
 								select: { pollVotes: true },
 							},
@@ -54,7 +56,10 @@ export default async function routes(fastify: FastifyTypebox) {
 			if (!row) {
 				return reply.sendError(APIErrors.ITEM_NOT_FOUND("Poll"));
 			}
-			const result: PollRespBody = ModelConverter.toIPoll(row);
+			const result: PollRespBody = ModelConverter.toIPoll(
+				row,
+				session.userId,
+			);
 			return reply.send(result);
 		},
 	);
@@ -182,6 +187,7 @@ export default async function routes(fastify: FastifyTypebox) {
 					},
 					pollAnswers: {
 						include: {
+							pollVotes: true,
 							_count: {
 								select: { pollVotes: true },
 							},
@@ -192,7 +198,10 @@ export default async function routes(fastify: FastifyTypebox) {
 			if (!updatedPoll) {
 				return reply.sendError(APIErrors.ITEM_NOT_FOUND("Poll"));
 			}
-			const result: PollRespBody = ModelConverter.toIPoll(updatedPoll);
+			const result: PollRespBody = ModelConverter.toIPoll(
+				updatedPoll,
+				session.userId,
+			);
 			return reply.send(result);
 		},
 	);
@@ -257,6 +266,7 @@ export default async function routes(fastify: FastifyTypebox) {
 					},
 					pollAnswers: {
 						include: {
+							pollVotes: true,
 							_count: {
 								select: { pollVotes: true },
 							},
@@ -267,7 +277,10 @@ export default async function routes(fastify: FastifyTypebox) {
 			if (!updatedPoll) {
 				return reply.sendError(APIErrors.ITEM_NOT_FOUND("Poll"));
 			}
-			const result: PollRespBody = ModelConverter.toIPoll(updatedPoll);
+			const result: PollRespBody = ModelConverter.toIPoll(
+				updatedPoll,
+				session.userId,
+			);
 			return reply.send(result);
 		},
 	);

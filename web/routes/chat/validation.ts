@@ -14,6 +14,8 @@ import {
 	ChatPaginatedQuery,
 	ChatUserIdParams,
 	CreateMessageReportReqBody,
+	PurchaseChatPaidPostReqBody,
+	ChatPaidPostPriceReqQuery,
 } from "./schemas.js";
 
 export const ChatPaginatedQueryValidator = Type.Object({
@@ -77,19 +79,25 @@ export const ChatConversationMessagesPostReqBodyValidator = Type.Object({
 	messageType: Type.Optional(
 		Type.Number({
 			minimum: 0,
-			maximum: 2,
+			maximum: 3,
 			default: 0,
 		}),
 	),
 	content: Type.String({
 		maxLength: 1000,
 	}),
-	gif: Type.Optional(gifPayloadSchema),
 	uploadIds: Type.Optional(
 		Type.Array(Type.String({ format: "snowflake" }), {
 			maxItems: 4,
 		}),
 	),
+	previewUploadIds: Type.Optional(
+		Type.Array(Type.String({ format: "snowflake" }), {
+			maxItems: 4,
+		}),
+	),
+	value: Type.Optional(Type.String()),
+	gif: Type.Optional(gifPayloadSchema),
 	parentId: Type.Optional(Type.String({ format: "snowflake" })),
 });
 
@@ -153,4 +161,29 @@ export const ChannelMediaPageQueryValidator = Type.Object({
 
 assert<
 	Equals<Static<typeof ChannelMediaPageQueryValidator>, ChannelMediaPageQuery>
+>();
+
+export const PurchaseChatPaidPostReqBodyValidator = Type.Object({
+	messageId: Type.String({ format: "snowflake" }),
+	customerPaymentProfileId: Type.String(),
+	fanReferralCode: Type.Optional(Type.String()),
+});
+
+assert<
+	Equals<
+		Static<typeof PurchaseChatPaidPostReqBodyValidator>,
+		PurchaseChatPaidPostReqBody
+	>
+>();
+
+export const ChatPaidPostPriceReqQueryValidator = Type.Object({
+	id: Type.String({ format: "snowflake" }),
+	customerPaymentProfileId: Type.Optional(Type.String()),
+});
+
+assert<
+	Equals<
+		Static<typeof ChatPaidPostPriceReqQueryValidator>,
+		ChatPaidPostPriceReqQuery
+	>
 >();

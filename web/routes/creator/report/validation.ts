@@ -7,9 +7,10 @@ import {
 import { ProfileReportFlag, ReportStatus } from "@prisma/client";
 
 export const UserReportCreateReqBodyValidator = Type.Object({
-	userId: Type.Required(Type.String({ format: "snowflake" })),
+	userId: Type.String({ format: "snowflake" }),
 	flag: Type.Enum(ProfileReportFlag),
 	reason: Type.Optional(Type.String()),
+	thumbId: Type.Optional(Type.String()),
 });
 assert<
 	Equals<

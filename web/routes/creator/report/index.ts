@@ -51,7 +51,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				}
 				const UserReports = await prisma.userReport.findMany({
 					where: { creatorId: profile.id },
-					include: { user: true },
+					include: { user: true, thumb: true },
 					skip: (page - 1) * size,
 					take: size,
 				});
@@ -89,7 +89,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				const { id } = request.params;
 				const userReport = await prisma.userReport.findFirst({
 					where: { id: BigInt(id), creatorId: profile.id },
-					include: { user: true },
+					include: { user: true, thumb: true },
 				});
 				if (!userReport)
 					return reply.sendError(
@@ -129,6 +129,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				const { status } = request.body;
 				const userReport = await prisma.userReport.findFirst({
 					where: { id: BigInt(id), creatorId: profile.id },
+					include: { user: true, thumb: true },
 				});
 				if (!userReport) {
 					return reply.sendError(
@@ -185,9 +186,13 @@ export default async function routes(fastify: FastifyTypebox) {
 						flag: data.flag,
 						userId: BigInt(data.userId),
 						reason: data.reason,
+						thumbId: data.thumbId
+							? BigInt(data.thumbId)
+							: undefined,
 					},
 				});
-				return reply.status(201);
+
+				return reply.status(201).send({ success: true });
 			} catch (err) {
 				return reply.sendError(APIErrors.GENERIC_ERROR);
 			}

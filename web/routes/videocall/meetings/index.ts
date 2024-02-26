@@ -6,7 +6,6 @@ import {
 	TransactionStatus,
 	User,
 } from "@prisma/client";
-import { setInterval } from "node:timers/promises";
 import {
 	DEFAULT_PAGE_SIZE,
 	isOutOfRange,
@@ -27,20 +26,17 @@ import APIErrors from "../../../errors/index.js";
 import { MeetingService } from "../../../../common/service/MeetingService.js";
 import RPCManagerService from "../../../../common/service/RPCManagerService.js";
 import { PaymentService } from "../../../../common/service/PaymentService.js";
-import { CreateMeetingBody, GetChimeReply, MeetingsQuery } from "./schemas.js";
-import {
-	CreateMeetingBodyValidator,
-	MeetingQueryValidator,
-} from "./validation.js";
 import { MAX_MEETING_DURATION } from "../durations/validation.js";
 import {
 	meetingAccepted,
 	meetingCancelled,
 	meetingRequested,
 } from "../../../../common/rpc/MeetingRPC.js";
-import { TaxjarError } from "taxjar/dist/util/types.js";
-
-const DECIMAL_TO_CENT_FACTOR = 100;
+import { CreateMeetingBody, GetChimeReply, MeetingsQuery } from "./schemas.js";
+import {
+	CreateMeetingBodyValidator,
+	MeetingQueryValidator,
+} from "./validation.js";
 
 export default async function routes(fastify: FastifyTypebox) {
 	const { container } = fastify;
@@ -50,76 +46,8 @@ export default async function routes(fastify: FastifyTypebox) {
 	const prisma = await container.resolve(PrismaService);
 	const snowflake = await container.resolve(SnowflakeService);
 	const meetingService = await container.resolve(MeetingService);
-	const authorizeNetService = await container.resolve(AuthorizeNetService);
 	const paymentService = await container.resolve(PaymentService);
 	const rpcService = await container.resolve(RPCManagerService);
-
-	fastify.post<{
-		Body: CreateMeetingBody;
-	}>(
-		"/price",
-		{
-			schema: { body: CreateMeetingBodyValidator },
-			preHandler: [
-				sessionManager.sessionPreHandler,
-				sessionManager.requireAuthHandler,
-				paymentService.requirePaymentProfile,
-			],
-		},
-		async (request, reply) => {
-			const session = request.session!;
-
-			const creator = await prisma.profile.findFirst({
-				where: { id: BigInt(request.body.hostId) },
-			});
-			if (!creator || creator.userId === BigInt(session.userId)) {
-				return reply.sendError(
-					APIErrors.INVALID_MEETING_HOST(request.body.hostId),
-				);
-			}
-
-			// Validate duration
-			const duration = await prisma.meetingDuration.findFirst({
-				where: {
-					creatorId: creator.id,
-					length: request.body.duration,
-					isEnabled: true,
-				},
-			});
-			if (!duration) {
-				return reply.sendError(APIErrors.INVALID_DURATION);
-			}
-
-			if (request.body.customerPaymentProfileId) {
-				const feesOutput = await paymentService.calculateVideoCallPrice(
-					session,
-					duration.price * DECIMAL_TO_CENT_FACTOR,
-					request.body.customerPaymentProfileId,
-				);
-
-				if (feesOutput instanceof TaxjarError) {
-					return reply.sendError(
-						APIErrors.PAYMENT_FAILED(feesOutput.detail),
-					);
-				}
-
-				reply.send({
-					amount:
-						feesOutput.amount.getAmount() / DECIMAL_TO_CENT_FACTOR,
-					platformFee:
-						feesOutput.platformFee.getAmount() /
-						DECIMAL_TO_CENT_FACTOR,
-					vatFee:
-						feesOutput.vatFee.getAmount() / DECIMAL_TO_CENT_FACTOR,
-					totalAmount:
-						feesOutput.totalAmount.getAmount() /
-						DECIMAL_TO_CENT_FACTOR,
-				});
-			}
-
-			return reply.status(201).send();
-		},
-	);
 
 	fastify.post<{ Body: CreateMeetingBody }>(
 		"/",
@@ -248,6 +176,7 @@ export default async function routes(fastify: FastifyTypebox) {
 					const intervalStartTime = DateTime.fromJSDate(
 						interval.startTime,
 					)
+						.toUTC()
 						.set({
 							year: startTime.year,
 							month: startTime.month,
@@ -256,6 +185,9 @@ export default async function routes(fastify: FastifyTypebox) {
 						.set({
 							weekday:
 								ModelConverter.weekDay2Index(interval.day) + 1,
+						})
+						.setZone(settings.timezone || "utc", {
+							keepLocalTime: true,
 						});
 					const intervalEndTime = intervalStartTime.plus({
 						minute: interval.length + 1,
@@ -278,21 +210,24 @@ export default async function routes(fastify: FastifyTypebox) {
 				return reply.sendError(APIErrors.MEETING_SCHEDULE_MISMATCH);
 			}
 
-			// Check vacations
-			const vacations = await prisma.meetingVacation.findMany({
-				where: { creatorId: creator.id },
-			});
-			if (
-				vacations.some((vacation) => {
-					const vacationInterval = Interval.fromDateTimes(
-						DateTime.fromJSDate(vacation.startDate),
-						DateTime.fromJSDate(vacation.endDate),
-					);
-					return vacationInterval.intersection(meetingTimeInterval)
-						?.isValid;
-				})
-			) {
-				return reply.sendError(APIErrors.MEETING_VACATION_CONFLICT);
+			if (settings.vacationsEnabled) {
+				// Check vacations
+				const vacations = await prisma.meetingVacation.findMany({
+					where: { creatorId: creator.id },
+				});
+				if (
+					vacations.some((vacation) => {
+						const vacationInterval = Interval.fromDateTimes(
+							DateTime.fromJSDate(vacation.startDate),
+							DateTime.fromJSDate(vacation.endDate),
+						);
+						return vacationInterval.intersection(
+							meetingTimeInterval,
+						)?.isValid;
+					})
+				) {
+					return reply.sendError(APIErrors.MEETING_VACATION_CONFLICT);
+				}
 			}
 
 			// Create meeting
@@ -313,7 +248,7 @@ export default async function routes(fastify: FastifyTypebox) {
 					creator,
 					user,
 					meeting,
-					duration.price * DECIMAL_TO_CENT_FACTOR,
+					duration.price,
 					request.body.customerPaymentProfileId,
 				);
 				if (error) {

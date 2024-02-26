@@ -31,6 +31,7 @@ import { resolveURLsPostLike } from "../../../utils/UploadUtils.js";
 import CloudflareStreamService from "../../../../common/service/CloudflareStreamService.js";
 import MediaUploadService from "../../../../common/service/MediaUploadService.js";
 import { TaxjarError } from "taxjar/dist/util/types.js";
+import InboxManagerService from "../../../../common/service/InboxManagerService.js";
 
 const DECIMAL_TO_CENT_FACTOR = 100;
 
@@ -42,6 +43,7 @@ export default async function routes(fastify: FastifyTypebox) {
 	const authorizeNetService = await container.resolve(AuthorizeNetService);
 	const feesCalculator = await container.resolve(FeesCalculator);
 	const siftService = await container.resolve(SiftService);
+	const inboxManager = await container.resolve(InboxManagerService);
 	const cloudflareStream = await container.resolve(CloudflareStreamService);
 	const mediaUpload = await container.resolve(MediaUploadService);
 
@@ -681,6 +683,7 @@ export default async function routes(fastify: FastifyTypebox) {
 										roles: { include: { role: true } },
 										pollAnswers: {
 											include: {
+												pollVotes: true,
 												_count: {
 													select: { pollVotes: true },
 												},
@@ -850,7 +853,10 @@ export default async function routes(fastify: FastifyTypebox) {
 						: undefined,
 					poll: row.post.poll
 						? {
-								...ModelConverter.toIPoll(row.post.poll),
+								...ModelConverter.toIPoll(
+									row.post.poll,
+									session.userId,
+								),
 								roles: row.post.poll.roles.map((r) =>
 									ModelConverter.toIRole(r.role),
 								),
@@ -965,6 +971,7 @@ export default async function routes(fastify: FastifyTypebox) {
 										roles: { include: { role: true } },
 										pollAnswers: {
 											include: {
+												pollVotes: true,
 												_count: {
 													select: { pollVotes: true },
 												},
@@ -1402,10 +1409,9 @@ export default async function routes(fastify: FastifyTypebox) {
 										roles: { include: { role: true } },
 										pollAnswers: {
 											include: {
+												pollVotes: true,
 												_count: {
-													select: {
-														pollVotes: true,
-													},
+													select: { pollVotes: true },
 												},
 											},
 										},
@@ -1577,7 +1583,10 @@ export default async function routes(fastify: FastifyTypebox) {
 						: undefined,
 					poll: row.post.poll
 						? {
-								...ModelConverter.toIPoll(row.post.poll),
+								...ModelConverter.toIPoll(
+									row.post.poll,
+									session.userId,
+								),
 								roles: row.post.poll.roles.map((r) =>
 									ModelConverter.toIRole(r.role),
 								),

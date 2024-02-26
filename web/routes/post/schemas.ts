@@ -1,6 +1,7 @@
 import { PostType } from "@prisma/client";
 import {
 	ICategory,
+	IFan,
 	IFundraiser,
 	IGiveaway,
 	IPaidPost,
@@ -231,7 +232,7 @@ export interface AnalyzeFansRespBody {
 }
 
 export interface SearchFansRespBody {
-	fans: IUser[];
+	fans: IFan[];
 	page: number;
 	size: number;
 	total: number;

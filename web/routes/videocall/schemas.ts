@@ -1,4 +1,5 @@
 import { MeetingContentType, MeetingType } from "@prisma/client";
+import { IMediaVideoUpload } from "../../CommonAPISchemas.js";
 
 export interface GetAvailabilityQuery {
 	creatorId: string;
@@ -31,6 +32,11 @@ export interface VideoCallProfile {
 	meetingTitle?: string;
 	meetingDescription?: string;
 	meetingDurations: VideoCallProfileMeetingDuration[];
-	isAvailable: boolean;
-	videoPreview: string | undefined;
+	previews: IMediaVideoUpload[];
+}
+
+export interface GetVideoCallPriceParams {
+	hostId: string;
+	duration: number;
+	customerPaymentProfileId?: string;
 }

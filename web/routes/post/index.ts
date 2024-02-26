@@ -60,6 +60,7 @@ import {
 	SendInvitationReqBodyValidator,
 } from "./validation.js";
 import XPService from "../../../common/service/XPService.js";
+import { create } from "node:domain";
 
 export default async function routes(fastify: FastifyTypebox) {
 	const { container } = fastify;
@@ -349,6 +350,7 @@ export default async function routes(fastify: FastifyTypebox) {
 							roles: { include: { role: true } },
 							pollAnswers: {
 								include: {
+									pollVotes: true,
 									_count: {
 										select: { pollVotes: true },
 									},
@@ -462,7 +464,7 @@ export default async function routes(fastify: FastifyTypebox) {
 					: undefined,
 				poll: row.poll
 					? {
-							...ModelConverter.toIPoll(row.poll),
+							...ModelConverter.toIPoll(row.poll, session.userId),
 							roles: row.poll.roles.map((r) =>
 								ModelConverter.toIRole(r.role),
 							),
@@ -673,33 +675,17 @@ export default async function routes(fastify: FastifyTypebox) {
 					isAudioLeveling: data.isAudioLeveling,
 					isPaidPost: !!data.paidPost,
 					isPosted: isPosted,
-					postMedias: data.postMedias
-						? {
-								createMany: {
-									data: data.postMedias.map((item) => ({
-										id: snowflake.gen(),
-										uploadId: BigInt(item.postMediaId),
-										postMediaTags:
-											item.tags && item.tags.length > 0
-												? {
-														createMany: {
-															data: item.tags.map(
-																(tag) => ({
-																	id: snowflake.gen(),
-																	userId: BigInt(
-																		tag.userId,
-																	),
-																	pointX: tag.pointX,
-																	pointY: tag.pointY,
-																}),
-															),
-														},
-												  }
-												: undefined,
-									})),
-								},
-						  }
-						: undefined,
+					postMedias:
+						data.postMedias && data.postMedias.length > 0
+							? {
+									createMany: {
+										data: data.postMedias.map((item) => ({
+											id: snowflake.gen(),
+											uploadId: BigInt(item.postMediaId),
+										})),
+									},
+							  }
+							: undefined,
 					postForms: data.formIds
 						? {
 								createMany: {
@@ -866,6 +852,14 @@ export default async function routes(fastify: FastifyTypebox) {
 					poll: {
 						include: {
 							thumbMedia: true,
+							pollAnswers: {
+								include: {
+									pollVotes: true,
+									_count: {
+										select: { pollVotes: true },
+									},
+								},
+							},
 							roles: { include: { role: true } },
 						},
 					},
@@ -965,44 +959,134 @@ export default async function routes(fastify: FastifyTypebox) {
 				}
 			}
 
-			await resolveURLsPostLike(created, cloudflareStream, mediaUpload);
+			if (created.postMedias && data.postMedias) {
+				for (let i = 0; i < created.postMedias.length; i++) {
+					const createdPostMedia = created.postMedias[i];
+					const postMedia = data.postMedias.find(
+						(pm) =>
+							BigInt(pm.postMediaId) ===
+							createdPostMedia.uploadId,
+					);
+					if (
+						!postMedia ||
+						!postMedia.tags ||
+						postMedia.tags.length === 0
+					) {
+						break;
+					}
+
+					await prisma.postMediaTag.createMany({
+						data: postMedia.tags.map((t) => ({
+							id: snowflake.gen(),
+							postMediaId: createdPostMedia.id,
+							userId: BigInt(t.userId),
+							pointX: t.pointX,
+							pointY: t.pointY,
+						})),
+					});
+				}
+			}
+
+			const updatedPost = await prisma.post.findUnique({
+				where: { id: created.id },
+				include: {
+					categories: {
+						include: { category: true },
+						orderBy: { category: { order: "asc" } },
+					},
+					fundraiser: { include: { thumbMedia: true } },
+					giveaway: {
+						include: {
+							thumbMedia: true,
+							roles: { include: { role: true } },
+						},
+					},
+					paidPost: {
+						include: { thumbMedia: true },
+					},
+					schedule: true,
+					roles: { include: { role: true } },
+					taggedPeoples: { include: { user: true } },
+					profile: true,
+					thumbMedia: true,
+					postMedias: {
+						include: {
+							upload: true,
+							postMediaTags: {
+								include: {
+									user: true,
+								},
+							},
+						},
+					},
+					poll: {
+						include: {
+							thumbMedia: true,
+							pollAnswers: {
+								include: {
+									pollVotes: true,
+									_count: {
+										select: { pollVotes: true },
+									},
+								},
+							},
+							roles: { include: { role: true } },
+						},
+					},
+				},
+			});
+
+			if (!updatedPost) {
+				return reply.sendError(APIErrors.ITEM_NOT_FOUND("Post"));
+			}
+
+			await resolveURLsPostLike(
+				updatedPost,
+				cloudflareStream,
+				mediaUpload,
+			);
 
 			const result: PostRespBody = {
-				...ModelConverter.toIPost(created),
-				roles: created.roles.map((r) => ModelConverter.toIRole(r.role)),
-				categories: created.categories.map((c) =>
+				...ModelConverter.toIPost(updatedPost),
+				roles: updatedPost.roles.map((r) =>
+					ModelConverter.toIRole(r.role),
+				),
+				categories: updatedPost.categories.map((c) =>
 					ModelConverter.toICategory(c.category),
 				),
-				giveaway: created.giveaway
+				giveaway: updatedPost.giveaway
 					? {
-							...ModelConverter.toIGiveaway(created.giveaway),
-							roles: created.giveaway.roles.map((r) =>
+							...ModelConverter.toIGiveaway(updatedPost.giveaway),
+							roles: updatedPost.giveaway.roles.map((r) =>
 								ModelConverter.toIRole(r.role),
 							),
 					  }
 					: undefined,
-				fundraiser: created.fundraiser
-					? ModelConverter.toIFundraiser(created.fundraiser)
+				fundraiser: updatedPost.fundraiser
+					? ModelConverter.toIFundraiser(updatedPost.fundraiser)
 					: undefined,
-				paidPost: created.paidPost
-					? ModelConverter.toIPaidPost(created.paidPost)
+				paidPost: updatedPost.paidPost
+					? ModelConverter.toIPaidPost(updatedPost.paidPost)
 					: undefined,
-				schedule: created.schedule
-					? ModelConverter.toISchedule(created.schedule)
+				schedule: updatedPost.schedule
+					? ModelConverter.toISchedule(updatedPost.schedule)
 					: undefined,
-				taggedPeoples: created.taggedPeoples.map((t) => ({
+				taggedPeoples: updatedPost.taggedPeoples.map((t) => ({
 					...ModelConverter.toITaggedPeople(t),
 					user: ModelConverter.toIUser(t.user),
 				})),
-				poll: created.poll
+				poll: updatedPost.poll
 					? {
-							...ModelConverter.toIPoll(created.poll),
-							roles: created.poll.roles.map((r) =>
+							...ModelConverter.toIPoll(
+								updatedPost.poll,
+								session.userId,
+							),
+							roles: updatedPost.poll.roles.map((r) =>
 								ModelConverter.toIRole(r.role),
 							),
 					  }
 					: undefined,
-				profile: ModelConverter.toIProfile(created.profile),
+				profile: ModelConverter.toIProfile(updatedPost.profile),
 			};
 			return reply.status(201).send(result);
 		},
@@ -1449,9 +1533,19 @@ export default async function routes(fastify: FastifyTypebox) {
 			const whereCondition = {
 				OR: [
 					{
-						roles: {
-							none: {},
-						},
+						AND: [
+							{
+								roles: {
+									none: {},
+								},
+								tiers: {
+									none: {},
+								},
+								users: {
+									none: {},
+								},
+							},
+						],
 					},
 					{
 						roles: {
@@ -1462,6 +1556,29 @@ export default async function routes(fastify: FastifyTypebox) {
 											userId: BigInt(session.userId),
 										},
 									},
+								},
+							},
+						},
+					},
+					{
+						tiers: {
+							some: {
+								tier: {
+									paymentSubscriptions: {
+										some: {
+											userId: BigInt(session.userId),
+											status: SubscriptionStatus.Active,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						users: {
+							some: {
+								user: {
+									id: BigInt(session.userId),
 								},
 							},
 						},
@@ -1548,10 +1665,9 @@ export default async function routes(fastify: FastifyTypebox) {
 								roles: { include: { role: true } },
 								pollAnswers: {
 									include: {
+										pollVotes: true,
 										_count: {
-											select: {
-												pollVotes: true,
-											},
+											select: { pollVotes: true },
 										},
 									},
 								},
@@ -1560,8 +1676,12 @@ export default async function routes(fastify: FastifyTypebox) {
 						roles: {
 							include: { role: true },
 						},
-						tiers: true,
-						users: true,
+						tiers: {
+							include: { tier: true },
+						},
+						users: {
+							include: { user: true },
+						},
 						profile: {
 							include: {
 								stories: {
@@ -1728,13 +1848,18 @@ export default async function routes(fastify: FastifyTypebox) {
 						: undefined,
 					poll: row.poll
 						? {
-								...ModelConverter.toIPoll(row.poll),
+								...ModelConverter.toIPoll(
+									row.poll,
+									session.userId,
+								),
 								roles: row.poll.roles.map((r) =>
 									ModelConverter.toIRole(r.role),
 								),
 						  }
 						: undefined,
 					roles: row.roles.map((r) => ModelConverter.toIRole(r.role)),
+					tiers: row.tiers.map((t) => ModelConverter.toITier(t.tier)),
+					users: row.users.map((u) => ModelConverter.toIUser(u.user)),
 				})),
 				page,
 				size,
@@ -1780,14 +1905,10 @@ export default async function routes(fastify: FastifyTypebox) {
 
 			const session = request.session;
 			if (session) {
-				const requestingUser =
-					(await session.getUserWithProfile(prisma))!;
-				const profile = requestingUser.profile;
-
 				const userLevel = await prisma.userLevel.findFirst({
 					where: {
 						creatorId: BigInt(user.profile.id),
-						userId: BigInt(requestingUser.id),
+						userId: BigInt(session.userId),
 					},
 				});
 
@@ -1796,30 +1917,73 @@ export default async function routes(fastify: FastifyTypebox) {
 					where: { userId: BigInt(session.userId) },
 				});
 
+				const isSelf = session.userId === userId;
+
 				const whereCondition = {
-					OR: [
-						{
-							roles: {
-								none: {},
-							},
-						},
-						{
-							roles:
-								requestingUser.id != user.id
-									? {
-											some: {
-												role: {
-													id: BigInt(
-														userLevel?.roleId || 0,
-													),
+					OR: isSelf
+						? undefined
+						: [
+								{
+									AND: [
+										{
+											roles: {
+												none: {},
+											},
+											tiers: {
+												none: {},
+											},
+											users: {
+												none: {},
+											},
+										},
+									],
+								},
+								{
+									roles: {
+										some: {
+											role: {
+												userLevels: {
+													some: {
+														userId: BigInt(
+															session.userId,
+														),
+													},
 												},
 											},
-									  }
-									: undefined,
-						},
-					],
+										},
+									},
+								},
+								{
+									tiers: {
+										some: {
+											tier: {
+												paymentSubscriptions: {
+													some: {
+														userId: BigInt(
+															session.userId,
+														),
+														status: SubscriptionStatus.Active,
+													},
+												},
+											},
+										},
+									},
+								},
+								{
+									users: {
+										some: {
+											user: {
+												id: BigInt(session.userId),
+											},
+										},
+									},
+								},
+						  ],
+
 					profileId: user.profile.id,
-					id: { notIn: hiddenPosts.map((p) => p.postId) },
+					id: isSelf
+						? undefined
+						: { notIn: hiddenPosts.map((p) => p.postId) },
 					isArchived: false,
 					categories: categoryId
 						? {
@@ -1945,10 +2109,9 @@ export default async function routes(fastify: FastifyTypebox) {
 									roles: { include: { role: true } },
 									pollAnswers: {
 										include: {
+											pollVotes: true,
 											_count: {
-												select: {
-													pollVotes: true,
-												},
+												select: { pollVotes: true },
 											},
 										},
 									},
@@ -1957,8 +2120,12 @@ export default async function routes(fastify: FastifyTypebox) {
 							roles: {
 								include: { role: true },
 							},
-							tiers: true,
-							users: true,
+							tiers: {
+								include: { tier: true },
+							},
+							users: {
+								include: { user: true },
+							},
 							schedule: true,
 							_count: {
 								select: {
@@ -2086,7 +2253,7 @@ export default async function routes(fastify: FastifyTypebox) {
 										.paidPost!.PaidPostTransaction.length >
 								  0
 								: false,
-						isSelf: row.profileId === profile?.id,
+						isSelf,
 						isExclusive:
 							row.roles.length > 0 ||
 							row.tiers.length > 0 ||
@@ -2116,13 +2283,18 @@ export default async function routes(fastify: FastifyTypebox) {
 						: undefined,
 					poll: row.poll
 						? {
-								...ModelConverter.toIPoll(row.poll),
+								...ModelConverter.toIPoll(
+									row.poll,
+									session.userId,
+								),
 								roles: row.poll.roles.map((r) =>
 									ModelConverter.toIRole(r.role),
 								),
 						  }
 						: undefined,
 					roles: row.roles.map((r) => ModelConverter.toIRole(r.role)),
+					tiers: row.tiers.map((t) => ModelConverter.toITier(t.tier)),
+					users: row.users.map((u) => ModelConverter.toIUser(u.user)),
 					schedule: row.schedule
 						? ModelConverter.toISchedule(row.schedule)
 						: undefined,
@@ -2511,11 +2683,19 @@ export default async function routes(fastify: FastifyTypebox) {
 						},
 					],
 				},
+				include: {
+					levels: true,
+				},
 				skip: (page - 1) * size,
 				take: size,
 			});
 			const result: SearchFansRespBody = {
-				fans: fans.map((f) => ModelConverter.toIUser(f)),
+				fans: fans.map((f) =>
+					ModelConverter.toIFan({
+						...f,
+						level: f.levels.find((l) => l.creatorId === profile.id),
+					}),
+				),
 				page,
 				size,
 				total,

@@ -7,6 +7,7 @@ import {
 	MeetingUser,
 	Profile,
 	RtcStreamCapability,
+	VideoCallStatus,
 } from "@prisma/client";
 import { DateTime, Interval } from "luxon";
 import { Logger } from "pino";
@@ -18,6 +19,7 @@ import { ChimeService } from "./ChimeService.js";
 import RPCManagerService from "./RPCManagerService.js";
 import { meetingReminder } from "../rpc/MeetingRPC.js";
 import { ModelConverter } from "../../web/models/modelConverter.js";
+import { MediaCapabilities } from "@aws-sdk/client-chime-sdk-meetings";
 
 @Injectable()
 export class MeetingService {
@@ -108,14 +110,60 @@ export class MeetingService {
 		return meeting;
 	}
 
-	async getChimeMeeting(meeting: Meeting) {
+	async createVideoCall(channelId: bigint, userIds: bigint[]) {
+		const callId = this.snowflake.gen();
+		const chimeMeeting = await this.chime.createMeeting(
+			String(callId),
+			uuidv4(),
+		);
+
+		const chimeMeetingId = chimeMeeting.Meeting?.MeetingId;
+		if (!chimeMeetingId) {
+			this.logger.error(
+				"Failed to create Chime meeting: missing MeetingId",
+			);
+			return;
+		}
+
+		const attendees = await Promise.all(
+			userIds.map((userId) => {
+				return this.chime
+					.createAttendee(chimeMeetingId, String(userId), {
+						Audio: MediaCapabilities.SEND_RECEIVE,
+						Video: MediaCapabilities.SEND_RECEIVE,
+						Content: MediaCapabilities.SEND_RECEIVE,
+					})
+					.then((attendee) => ({ ...attendee, userId }));
+			}),
+		);
+
+		const call = await this.prisma.videoCall.create({
+			data: {
+				id: callId,
+				messageChannelId: channelId,
+				chimeMeetingId,
+				participants: {
+					create: attendees.map(({ userId, Attendee }) => ({
+						userId,
+						attendeeId: Attendee?.AttendeeId,
+					})),
+				},
+			},
+		});
+		return call;
+	}
+
+	async getChimeMeeting(meeting: { chimeMeetingId: string | null }) {
 		if (!meeting.chimeMeetingId) {
 			return undefined;
 		}
 		return this.chime.getMeeting(meeting.chimeMeetingId);
 	}
 
-	async getChimeAttendee(meeting: Meeting, user: MeetingUser) {
+	async getChimeAttendee(
+		meeting: { chimeMeetingId: string | null },
+		user: { attendeeId: string | null },
+	) {
 		if (!meeting.chimeMeetingId || !user.attendeeId) {
 			return undefined;
 		}
@@ -211,6 +259,19 @@ export class MeetingService {
 		await this.chime.deleteMeeting(meeting.chimeMeetingId);
 	}
 
+	async endCall(videoCallId: bigint) {
+		const videoCall = await this.prisma.videoCall.findFirst({
+			where: { id: videoCallId },
+		});
+		if (!videoCall || !videoCall.chimeMeetingId) return;
+
+		await this.chime.deleteMeeting(videoCall.chimeMeetingId);
+		await this.prisma.videoCall.update({
+			where: { id: videoCallId },
+			data: { status: VideoCallStatus.Ended, endCallJobId: null },
+		});
+	}
+
 	private async schedulePrepareRoom(meetingId: bigint, date: Date) {
 		const interval = Interval.fromDateTimes(
 			DateTime.now(),
@@ -244,6 +305,24 @@ export class MeetingService {
 		await this.prisma.meeting.update({
 			where: { id: meetingId },
 			data: { cleanJobId: job.id },
+		});
+	}
+
+	async scheduleEndVideoCall(videoCallId: bigint, date: Date) {
+		const interval = Interval.fromDateTimes(
+			DateTime.now(),
+			DateTime.fromJSDate(date),
+		);
+		const queue = this.bullMQService.createQueue("VideoCall");
+		const job = await queue.add(
+			"endCall",
+			{ videoCallId },
+			{ delay: interval.length("milliseconds") || 0 },
+		);
+
+		await this.prisma.videoCall.update({
+			where: { id: videoCallId },
+			data: { endCallJobId: job.id },
 		});
 	}
 }

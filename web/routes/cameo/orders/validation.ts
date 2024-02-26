@@ -3,8 +3,10 @@ import { assert, Equals } from "tsafe";
 import {
 	CreateCustomVideoOrderBody,
 	CreateCustomVideoOrderReview,
+	CreateCustomVideoUploadBody,
+	VideoOrderParams,
 	OrdersQuery,
-	UpdateCustomVideoUpload,
+	VideoOrderUploadParams,
 } from "./schemas.js";
 
 export const CreateCustomVideoOrderBodyValidator = Type.Object({
@@ -45,13 +47,13 @@ export const OrdersQueryValidator = Type.Object({
 });
 assert<Equals<Static<typeof OrdersQueryValidator>, OrdersQuery>>();
 
-export const UpdateCustomVideoUploadValidator = Type.Object({
+export const CreateCustomVideoUploadBodyValidator = Type.Object({
 	uploadId: Type.String(),
 });
 assert<
 	Equals<
-		Static<typeof UpdateCustomVideoUploadValidator>,
-		UpdateCustomVideoUpload
+		Static<typeof CreateCustomVideoUploadBodyValidator>,
+		CreateCustomVideoUploadBody
 	>
 >();
 
@@ -63,5 +65,21 @@ assert<
 	Equals<
 		Static<typeof CreateCustomVideoOrderReviewValidator>,
 		CreateCustomVideoOrderReview
+	>
+>();
+
+export const VideoOrderParamsValidator = Type.Object({
+	orderId: Type.String({ format: "snowflake" }),
+});
+assert<Equals<Static<typeof VideoOrderParamsValidator>, VideoOrderParams>>();
+
+export const VideoOrderUploadParamsValidator = Type.Object({
+	orderId: Type.String({ format: "snowflake" }),
+	uploadId: Type.String({ format: "snowflake" }),
+});
+assert<
+	Equals<
+		Static<typeof VideoOrderUploadParamsValidator>,
+		VideoOrderUploadParams
 	>
 >();

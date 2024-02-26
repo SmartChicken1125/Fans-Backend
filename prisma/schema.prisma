@@ -52,6 +52,7 @@ enum UploadType {
     Image
     Audio
     Form
+    Report
 }
 
 enum GenderType {
@@ -96,7 +97,10 @@ enum UploadStorageType {
 enum UploadUsageType {
     POST // Used in posts, stories, comments, etc.
     CHAT // Used for chat messages, unlisted
-    CUSTOM_VIDEO // Used in custom videos (cameo feature)
+    CUSTOM_VIDEO // Used in custom video orders (creator upload)
+    VIDEO_CALL_PREVIEW // Used in video call settings
+    CUSTOM_VIDEO_PREVIEW // Used in custom video settings
+    CUSTOM_VIDEO_REQUEST // Used in custom video orders (fan upload)
 }
 
 enum PostReportFlag {
@@ -214,6 +218,7 @@ model User {
     hiddenPosts                     HiddenPost[]
     hiddenStories                   HiddenStory[]
     blockCreators                   BlockedCreator[]
+    blockUsers                      BlockedUser[]
     application                     Application[]
     postLikes                       PostLike[]
     notification                    Notification[]
@@ -235,6 +240,7 @@ model User {
     messageReports                  MessageReport[]
     customVideoOrders               CustomVideoOrder[]
     Review                          Review[]
+    videoCalls                      VideoCallParticipant[]
 
     @@index([username], type: BTree)
     @@index([displayName], type: BTree)
@@ -644,6 +650,7 @@ model Profile {
     referrer              CreatorReferral? @relation(name: "CreatorReferral", fields: [referrerCode], references: [code], onDelete: SetNull)
     referrerCode          String?
     isDisplayShop         Boolean          @default(true)
+    isAllowedScreenshot   Boolean?
     isDisplayReview       Boolean          @default(true)
 
     unusedAgeVerifyId     String?          @map("ageVerifyId")
@@ -665,7 +672,8 @@ model Profile {
     userReports                         UserReport[]
     highlights                          Highlight[]
     balance                             Balance[]
-    blockedUsers                        BlockedCreator[]
+    blockedCreators                     BlockedCreator[]
+    blockedUsers                        BlockedUser[]
     paymentSubscriptions                PaymentSubscription[]            @relation("SubscriptionCreator")
     paymentSubscriptionTransactions     PaymentSubscriptionTransaction[] @relation("PaymentSubscriptionCreator")
     PaidPostTransaction                 PaidPostTransaction[]            @relation("PaidPostTransactionCreator")
@@ -696,6 +704,8 @@ model Profile {
     storyTags                           StoryTag[]
     customVideoOrders                   CustomVideoOrder[]
     Review                              Review[]
+    meetingPreviewUploads               MeetingPreviewUpload[]
+    customVideoPreviewUploads           CustomVideoPreviewUpload[]
 
     @@index([userId], type: BTree)
     @@index([displayName], type: BTree)
@@ -771,6 +781,7 @@ model FanReferral {
     paidPostTransactions    PaidPostTransaction[]
     gemsSpendingLogs        GemsSpendingLog[]
     fanReferralTransactions FanReferralTransaction[]
+    ChatPaidPostTransaction ChatPaidPostTransaction[]
 
     @@index([profileId], type: BTree)
     @@index([userId], type: BTree)
@@ -861,17 +872,17 @@ model Bundle {
 }
 
 model Tier {
-    id                  BigInt                @id
-    profile             Profile               @relation(fields: [profileId], references: [id], onDelete: Cascade)
-    profileId           BigInt
-    title               String
-    price               Float
-    currency            String
-    description         String
-    cover               String
-    perks               String[]
-    updatedAt           DateTime              @updatedAt
-    PaymentSubscription PaymentSubscription[]
+    id                   BigInt                @id
+    profile              Profile               @relation(fields: [profileId], references: [id], onDelete: Cascade)
+    profileId            BigInt
+    title                String
+    price                Float
+    currency             String
+    description          String
+    cover                String
+    perks                String[]
+    updatedAt            DateTime              @updatedAt
+    paymentSubscriptions PaymentSubscription[]
 
     tierPosts TierPost[]
 
@@ -1435,18 +1446,28 @@ model Upload {
     length    Int               @default(0)
     updatedAt DateTime          @updatedAt
 
-    playlists        PlaylistUpload[]
-    postForm         PostForm?
-    postMedias       PostMedia[]
-    postThumbs       Post[]
-    paidPostThumbs   PaidPost[]
-    fundraiserThumbs Fundraiser[]
-    giveawayThumbs   Giveaway[]
-    pollThumbs       Poll[]
-    playlistThumbs   Playlist[]
-    messageThumbs    Message[]
-    storys           Story[]
-    customVideos     CustomVideoOrder[]
+    messageId        BigInt?  @map("messageId")
+    message          Message? @relation("MessageUploads", fields: [messageId], references: [id])
+    previewMessageId BigInt?  @map("previewMessageId")
+    previewMessage   Message? @relation("MessagePreviewUploads", fields: [previewMessageId], references: [id])
+
+    playlists                       PlaylistUpload[]
+    postForm                        PostForm?
+    postMedias                      PostMedia[]
+    postThumbs                      Post[]
+    paidPostThumbs                  PaidPost[]
+    fundraiserThumbs                Fundraiser[]
+    giveawayThumbs                  Giveaway[]
+    pollThumbs                      Poll[]
+    playlistThumbs                  Playlist[]
+    messageThumbs                   Message[]
+    storys                          Story[]
+    customVideos                    CustomVideoOrder[]
+    userReportThumbs                UserReport[]
+    meetingPreviewUploads           MeetingPreviewUpload[]
+    customVideoPreviewUploads       CustomVideoPreviewUpload[]
+    customVideoOrderRequestUploads  CustomVideoOrderRequestUpload[]
+    customVideoOrderResponseUploads CustomVideoOrderResponseUpload[]
 
     @@index([userId], type: BTree)
     @@index([type], type: Hash)
@@ -1694,6 +1715,7 @@ model MessageChannel {
     messages            Message[]
     participants        MessageChannelParticipant[]
     MessageChannelInbox MessageChannelInbox[]
+    videoCalls          VideoCall[]
 
     @@index([name], type: BTree)
     @@index([channelType], type: Hash)
@@ -1731,21 +1753,26 @@ model MessageChannelInbox {
 }
 
 model Message {
-    id          BigInt         @id
-    channel     MessageChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+    id          BigInt             @id
+    channel     MessageChannel     @relation(fields: [channelId], references: [id], onDelete: Cascade)
     channelId   BigInt
     userId      BigInt
     messageType Int
     content     String
+    value       Int?
+    status      TransactionStatus?
     parentId    BigInt?
     deletedAt   DateTime?
 
     parentMessage Message?  @relation("MessageReplies", fields: [parentId], references: [id])
     replies       Message[] @relation("MessageReplies")
 
-    uploads                 Upload[]
+    uploads                 Upload[]                  @relation("MessageUploads")
+    previewUploads          Upload[]                  @relation("MessagePreviewUploads")
     chatPaidPostTransaction ChatPaidPostTransaction[]
     messageReports          MessageReport[]
+    Upload                  Upload?                   @relation(fields: [uploadId], references: [id])
+    uploadId                BigInt?
 
     @@index([channelId], type: BTree)
     @@index([userId], type: BTree)
@@ -1792,6 +1819,7 @@ model Story {
     reports       StoryReport[]
     storyUrls     StoryUrl[]
     storyTags     StoryTag[]
+    storyTexts    StoryText[]
 
     @@index([profileId], type: BTree)
     @@index([isHighlight], type: Hash)
@@ -1799,6 +1827,21 @@ model Story {
     @@index([shareCount], type: BTree)
     @@index([updatedAt], type: BTree)
     @@map("stories")
+}
+
+model StoryText {
+    id        BigInt   @id
+    story     Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
+    storyId   BigInt
+    text      String
+    color     String?
+    font      String?
+    pointX    Int      @default(0)
+    pointY    Int      @default(0)
+    updatedAt DateTime @updatedAt
+
+    @@index([storyId], type: BTree)
+    @@map("story_texts")
 }
 
 model StoryUrl {
@@ -1947,6 +1990,8 @@ model UserReport {
     flag      ProfileReportFlag
     status    ReportStatus      @default(OPEN)
     reason    String?
+    thumb     Upload?           @relation(fields: [thumbId], references: [id], onDelete: Cascade)
+    thumbId   BigInt?
     updatedAt DateTime          @updatedAt
 
     @@index([creatorId], type: BTree)
@@ -2050,6 +2095,18 @@ model BlockedCreator {
     @@index([userId], type: BTree)
     @@index([creatorId], type: BTree)
     @@map("blocked_creators")
+}
+
+model BlockedUser {
+    id        BigInt  @id
+    creator   Profile @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+    creatorId BigInt
+    user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+    userId    BigInt
+
+    @@index([userId], type: BTree)
+    @@index([creatorId], type: BTree)
+    @@map("blocked_users")
 }
 
 model Application {
@@ -2177,6 +2234,8 @@ model ChatPaidPostTransaction {
     status           TransactionStatus
     error            String?
     createdAt        DateTime          @default(now())
+    fanReferral      FanReferral?      @relation(fields: [fanReferralCode], references: [code], onDelete: SetNull)
+    fanReferralCode  String?
 
     @@index([userId], type: BTree)
     @@index([creatorId], type: BTree)
@@ -2331,29 +2390,53 @@ enum MeetingContentType {
     Performance
     EighteenPlusAdult
     EighteenPlusSexual
+    Endorsement
     Spirituality
 }
 
+enum MeetingSettingsProgress {
+    None
+    Pricing
+    Availability
+    Content
+    Description
+    Notifications
+    Completed
+}
+
 model MeetingSettings {
-    profile                   Profile              @relation(fields: [profileId], references: [id], onDelete: Cascade)
+    profile                   Profile                 @relation(fields: [profileId], references: [id], onDelete: Cascade)
     profileId                 BigInt
-    bufferBetweenCalls        Int                  @default(5)
-    meetingType               MeetingType          @default(OneOnOne_TwoWay)
-    sexualContentAllowed      Boolean              @default(false)
-    contentPreferences        MeetingContentType[] @default([])
+    bufferBetweenCalls        Int                     @default(5)
+    meetingType               MeetingType             @default(OneOnOne_TwoWay)
+    sexualContentAllowed      Boolean                 @default(false)
+    contentPreferences        MeetingContentType[]    @default([])
     customContentPreferences  String?
     title                     String?
     description               String?
-    notificationNewRequests   Boolean              @default(true)
-    notificationCancellations Boolean              @default(true)
-    notificationReminders     Boolean              @default(true)
-    notificationsByEmail      Boolean              @default(true)
-    notificationsByPhone      Boolean              @default(true)
-    videoCallsEnabled         Boolean              @default(false)
+    notificationNewRequests   Boolean                 @default(true)
+    notificationCancellations Boolean                 @default(true)
+    notificationReminders     Boolean                 @default(true)
+    notificationsByEmail      Boolean                 @default(true)
+    notificationsByPhone      Boolean                 @default(true)
+    videoCallsEnabled         Boolean                 @default(false)
     videoPreviewStreamId      String?
+    progress                  MeetingSettingsProgress @default(None)
+    timezone                  String?
+    vacationsEnabled          Boolean                 @default(false)
 
     @@id([profileId])
     @@map("meeting_settings")
+}
+
+model MeetingPreviewUpload {
+    profile   Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+    profileId BigInt
+    upload    Upload  @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+    uploadId  BigInt
+
+    @@id([profileId, uploadId])
+    @@map("meeting_preview_uploads")
 }
 
 model MeetingVacation {
@@ -2395,26 +2478,49 @@ enum CameoVolumeTimeUnit {
     Monthly
 }
 
+enum CameoSettingsProgress {
+    None
+    Pricing
+    Content
+    RequestLimits
+    Description
+    Notifications
+    Completed
+}
+
 model CustomVideoSettings {
-    profile                       Profile             @relation(fields: [profileId], references: [id], onDelete: Cascade)
+    profile                       Profile               @relation(fields: [profileId], references: [id], onDelete: Cascade)
     profileId                     BigInt
-    contentTypes                  CameoContentType[]  @default([])
+    contentTypes                  CameoContentType[]    @default([])
     customContentType             String?
-    volumeTimeUnit                CameoVolumeTimeUnit @default(Daily)
+    volumeTimeUnit                CameoVolumeTimeUnit   @default(Daily)
     volumeLimit                   Int?
-    fulfillmentTime               Int                 @default(24) // hours
+    fulfillmentTime               Int                   @default(24) // hours
     description                   String?
-    sexualContentEnabled          Boolean             @default(false)
-    agreedToTerms                 Boolean             @default(false)
-    notificationNewRequests       Boolean             @default(true)
-    notificationPendingVideos     Boolean             @default(true)
-    notificationCompletedRequests Boolean             @default(true)
-    notificationsByEmail          Boolean             @default(true)
-    notificationsByPhone          Boolean             @default(true)
-    customVideoEnabled            Boolean             @default(false)
+    sexualContentEnabled          Boolean               @default(false)
+    agreedToTerms                 Boolean               @default(false)
+    notificationNewRequests       Boolean               @default(true)
+    notificationPendingVideos     Boolean               @default(true)
+    notificationCancelledVideos   Boolean               @default(true)
+    notificationCompletedRequests Boolean               @default(true)
+    notificationsByEmail          Boolean               @default(true)
+    notificationsByPhone          Boolean               @default(true)
+    customVideoEnabled            Boolean               @default(false)
+    showReviews                   Boolean               @default(true)
+    progress                      CameoSettingsProgress @default(None)
 
     @@id([profileId])
     @@map("custom_video_settings")
+}
+
+model CustomVideoPreviewUpload {
+    profile   Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+    profileId BigInt
+    upload    Upload  @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+    uploadId  BigInt
+
+    @@id([profileId, uploadId])
+    @@map("custom_video_preview_uploads")
 }
 
 model VideoCallPurchase {
@@ -2485,31 +2591,53 @@ enum Pronoun {
 }
 
 model CustomVideoOrder {
-    id               BigInt                 @id
-    status           CustomVideoOrderStatus @default(Pending)
-    recipientName    String?
-    recipientPronoun Pronoun?
-    instructions     String?
-    review           String?
-    score            Int?
-    duration         Int
-    price            Int                    @default(0) // denormalized field, only affects UI and sorting by price
-    currency         String                 @default("USD") // denormalized field, only affects UI
-    fan              User                   @relation(fields: [fanId], references: [id], onDelete: Cascade)
-    fanId            BigInt
-    creator          Profile                @relation(fields: [creatorId], references: [id], onDelete: Cascade)
-    creatorId        BigInt
-    createdAt        DateTime               @default(now())
-    dueDate          DateTime               @default(now())
-    videoUpload      Upload?                @relation(fields: [videoUploadId], references: [id], onDelete: Cascade)
-    videoUploadId    BigInt?
-    autoDeclineJobId String?
+    id                             BigInt                           @id
+    status                         CustomVideoOrderStatus           @default(Pending)
+    recipientName                  String?
+    recipientPronoun               Pronoun?
+    instructions                   String?
+    review                         String?
+    score                          Int?
+    duration                       Int
+    price                          Int                              @default(0) // denormalized field, only affects UI and sorting by price
+    currency                       String                           @default("USD") // denormalized field, only affects UI
+    fan                            User                             @relation(fields: [fanId], references: [id], onDelete: Cascade)
+    fanId                          BigInt
+    creator                        Profile                          @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+    creatorId                      BigInt
+    createdAt                      DateTime                         @default(now())
+    dueDate                        DateTime                         @default(now())
+    videoUpload                    Upload?                          @relation(fields: [videoUploadId], references: [id], onDelete: Cascade)
+    videoUploadId                  BigInt?
+    autoDeclineJobId               String?
+    customVideoOrderRequestUploads CustomVideoOrderRequestUpload[]
+    customVideoOrderResponseUpload CustomVideoOrderResponseUpload[]
 
     @@index([fanId], type: BTree)
     @@index([creatorId], type: BTree)
     @@index([dueDate], type: BTree)
     @@index([createdAt], type: BTree)
     @@map("custom_video_order")
+}
+
+model CustomVideoOrderRequestUpload {
+    order    CustomVideoOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+    orderId  BigInt
+    upload   Upload           @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+    uploadId BigInt
+
+    @@id([orderId, uploadId])
+    @@map("custom_video_order_request_uploads")
+}
+
+model CustomVideoOrderResponseUpload {
+    order    CustomVideoOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+    orderId  BigInt
+    upload   Upload           @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+    uploadId BigInt
+
+    @@id([orderId, uploadId])
+    @@map("custom_video_order_response_uploads")
 }
 
 model Review {
@@ -2525,4 +2653,33 @@ model Review {
     @@index([userId], type: BTree)
     @@index([creatorId], type: BTree)
     @@map("reviews")
+}
+
+enum VideoCallStatus {
+    Started
+    Ended
+}
+
+model VideoCall {
+    id               BigInt                 @id
+    messageChannel   MessageChannel         @relation(fields: [messageChannelId], references: [id], onDelete: Cascade)
+    messageChannelId BigInt
+    chimeMeetingId   String?
+    createdAt        DateTime               @default(now())
+    status           VideoCallStatus        @default(Started)
+    endCallJobId     String?
+    participants     VideoCallParticipant[]
+
+    @@map("video_calls")
+}
+
+model VideoCallParticipant {
+    user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+    userId      BigInt
+    videoCall   VideoCall @relation(fields: [videoCallId], references: [id], onDelete: Cascade)
+    videoCallId BigInt
+    attendeeId  String?
+
+    @@id([videoCallId, userId])
+    @@map("video_call_participants")
 }

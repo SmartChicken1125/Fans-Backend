@@ -1,5 +1,6 @@
 import { Logger } from "pino";
-import { Profile } from "@prisma/client";
+import { DateTime } from "luxon";
+import { Profile, UploadType, UploadUsageType } from "@prisma/client";
 import { FastifyTypebox } from "../../../types.js";
 import SessionManagerService, {
 	Session,
@@ -7,13 +8,15 @@ import SessionManagerService, {
 import PrismaService from "../../../../common/service/PrismaService.js";
 import APIErrors from "../../../errors/index.js";
 import CloudflareStreamService from "../../../../common/service/CloudflareStreamService.js";
+import { CreateCustomVideoUploadBody } from "../../cameo/orders/schemas.js";
+import { CreateCustomVideoUploadBodyValidator } from "../../cameo/orders/validation.js";
+import { CameoPreviewUploadParams } from "../../cameo/settings/schemas.js";
+import { IMediaVideoUpload } from "../../../CommonAPISchemas.js";
+import { CameoPreviewUploadParamsValidator } from "../../cameo/settings/validation.js";
+import { ModelConverter } from "../../../models/modelConverter.js";
+import MediaUploadService from "../../../../common/service/MediaUploadService.js";
 import { UpdateVideoCallSettingsValidator } from "./validation.js";
-import {
-	UpdateVideoCallSettings,
-	VideoCallSettings,
-	VideoCallSettingsReply,
-} from "./schema.js";
-import { firstParam } from "../../../../common/utils/Common.js";
+import { UpdateVideoCallSettings, VideoCallSettingsReply } from "./schema.js";
 
 export default async function routes(fastify: FastifyTypebox) {
 	const { container } = fastify;
@@ -22,6 +25,7 @@ export default async function routes(fastify: FastifyTypebox) {
 	const sessionManager = await container.resolve(SessionManagerService);
 	const prisma = await container.resolve(PrismaService);
 	const cloudflareStream = await container.resolve(CloudflareStreamService);
+	const mediaService = await container.resolve(MediaUploadService);
 
 	fastify.patch<{
 		Body: UpdateVideoCallSettings;
@@ -56,7 +60,19 @@ export default async function routes(fastify: FastifyTypebox) {
 				notificationsByEmail,
 				notificationsByPhone,
 				videoCallsEnabled,
+				progress,
+				timezone,
+				vacationsEnabled,
 			} = request.body;
+
+			if (timezone) {
+				const tzOffset = DateTime.now().setZone(timezone).offset;
+				if (Number.isNaN(tzOffset)) {
+					return reply.sendError(
+						APIErrors.INVALID_REQUEST("Invalid timezone"),
+					);
+				}
+			}
 
 			const updatedProfile = await prisma.meetingSettings.update({
 				where: { profileId: profile.id },
@@ -96,87 +112,15 @@ export default async function routes(fastify: FastifyTypebox) {
 					...(videoCallsEnabled !== undefined
 						? { videoCallsEnabled }
 						: {}),
+					...(progress !== undefined ? { progress } : {}),
+					...(timezone !== undefined ? { timezone } : {}),
+					...(vacationsEnabled !== undefined
+						? { vacationsEnabled }
+						: {}),
 				},
 			});
 
 			return reply.send(request.body);
-		},
-	);
-
-	fastify.post(
-		"/video-preview/tus",
-		{
-			preHandler: [
-				sessionManager.sessionPreHandler,
-				sessionManager.requireAuthHandler,
-				sessionManager.requireProfileHandler,
-			],
-		},
-		async (request, reply) => {
-			const session = request.session as Session;
-			const profile = (await session.getProfile(prisma)) as Profile;
-
-			const uploadLength = firstParam(request.headers["upload-length"]);
-			if (!uploadLength) {
-				return reply.sendError(
-					APIErrors.INVALID_REQUEST(
-						"Upload-Length header must be set.",
-					),
-				);
-			}
-
-			const upload = await cloudflareStream.createTusUpload(
-				BigInt(session.userId),
-				uploadLength,
-			);
-
-			await prisma.meetingSettings.update({
-				where: { profileId: profile.id },
-				data: { videoPreviewStreamId: upload.streamMediaId },
-			});
-
-			const signedUrl = cloudflareStream.getSignedVideoUrl(
-				upload.streamMediaId,
-			);
-
-			return reply.send({
-				url: signedUrl,
-				uploadUrl: upload.uploadUrl,
-			});
-		},
-	);
-
-	fastify.delete(
-		"/video-preview",
-		{
-			preHandler: [
-				sessionManager.sessionPreHandler,
-				sessionManager.requireAuthHandler,
-				sessionManager.requireProfileHandler,
-			],
-		},
-		async (request, reply) => {
-			const session = request.session as Session;
-			const profile = (await session.getProfile(prisma)) as Profile;
-
-			const settings = await prisma.meetingSettings.findFirst({
-				where: { profileId: profile.id },
-			});
-			if (!settings) {
-				return reply.sendError(APIErrors.MEETING_SETTINGS_NOT_FOUND);
-			}
-
-			if (settings.videoPreviewStreamId) {
-				await cloudflareStream.deleteVideo(
-					settings.videoPreviewStreamId,
-				);
-			}
-			await prisma.meetingSettings.update({
-				where: { profileId: profile.id },
-				data: { videoPreviewStreamId: null },
-			});
-
-			return reply.status(200).send();
 		},
 	);
 
@@ -199,13 +143,6 @@ export default async function routes(fastify: FastifyTypebox) {
 				return reply.sendError(APIErrors.MEETING_SETTINGS_NOT_FOUND);
 			}
 
-			const videoPreview =
-				(settings.videoPreviewStreamId &&
-					cloudflareStream.getSignedVideoUrl(
-						settings.videoPreviewStreamId,
-					)) ||
-				undefined;
-
 			return reply.send({
 				bufferBetweenCalls: settings.bufferBetweenCalls,
 				meetingType: settings.meetingType,
@@ -221,7 +158,177 @@ export default async function routes(fastify: FastifyTypebox) {
 				notificationsByEmail: settings.notificationsByEmail,
 				notificationsByPhone: settings.notificationsByPhone,
 				videoCallsEnabled: settings.videoCallsEnabled,
-				videoPreview,
+				progress: settings.progress,
+				timezone: settings.timezone || undefined,
+				vacationsEnabled: settings.vacationsEnabled,
+			});
+		},
+	);
+
+	fastify.post<{
+		Body: CreateCustomVideoUploadBody;
+	}>(
+		"/previews",
+		{
+			schema: {
+				body: CreateCustomVideoUploadBodyValidator,
+			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+				sessionManager.requireProfileHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session as Session;
+			const profile = await session.getProfile(prisma);
+			if (!profile) {
+				return reply.sendError(APIErrors.PERMISSION_ERROR);
+			}
+			const { uploadId } = request.body;
+
+			const upload = await prisma.upload.findFirst({
+				where: { id: BigInt(uploadId) },
+				select: { id: true, userId: true, usage: true, type: true },
+			});
+			if (!upload || upload.userId !== BigInt(session.userId)) {
+				return reply.sendError(APIErrors.PERMISSION_ERROR);
+			}
+			if (upload.usage !== UploadUsageType.VIDEO_CALL_PREVIEW) {
+				return reply.sendError(APIErrors.UPLOAD_INVALID_USAGE);
+			}
+			if (upload.type !== UploadType.Video) {
+				return reply.sendError(
+					APIErrors.UPLOAD_INVALID_TYPE(
+						"This method only accepts Video uploads.",
+					),
+				);
+			}
+
+			await prisma.meetingPreviewUpload.create({
+				data: { uploadId: upload.id, profileId: profile.id },
+			});
+
+			return reply.send({
+				uploadId,
+			});
+		},
+	);
+
+	fastify.get<{
+		Params: CameoPreviewUploadParams;
+		Reply: IMediaVideoUpload;
+	}>(
+		"/previews/:uploadId",
+		{
+			schema: {
+				params: CameoPreviewUploadParamsValidator,
+			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+				sessionManager.requireProfileHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session as Session;
+			const profile = await session.getProfile(prisma);
+			if (!profile) {
+				return reply.sendError(APIErrors.PERMISSION_ERROR);
+			}
+			const { uploadId } = request.params;
+
+			const upload = await prisma.meetingPreviewUpload.findFirst({
+				where: {
+					profileId: profile.id,
+					uploadId: BigInt(uploadId),
+				},
+				include: { upload: true },
+			});
+			if (!upload) {
+				return reply.sendError(APIErrors.ITEM_NOT_FOUND("Upload"));
+			}
+
+			const result = await ModelConverter.toIMediaVideoUpload(
+				cloudflareStream,
+				mediaService,
+			)(upload.upload);
+
+			return reply.send(result);
+		},
+	);
+
+	fastify.get<{
+		Reply: { results: IMediaVideoUpload[] };
+	}>(
+		"/previews",
+		{
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+				sessionManager.requireProfileHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session as Session;
+			const profile = await session.getProfile(prisma);
+			if (!profile) {
+				return reply.sendError(APIErrors.PERMISSION_ERROR);
+			}
+
+			const uploads = await prisma.meetingPreviewUpload.findMany({
+				where: { profileId: profile.id },
+				include: { upload: true },
+			});
+
+			const results = await Promise.all(
+				uploads.map((upload) =>
+					ModelConverter.toIMediaVideoUpload(
+						cloudflareStream,
+						mediaService,
+					)(upload.upload),
+				),
+			);
+
+			return reply.send({
+				results,
+			});
+		},
+	);
+
+	fastify.delete<{
+		Params: CameoPreviewUploadParams;
+	}>(
+		"/previews/:uploadId",
+		{
+			schema: {
+				params: CameoPreviewUploadParamsValidator,
+			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+				sessionManager.requireProfileHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session as Session;
+			const profile = await session.getProfile(prisma);
+			if (!profile) {
+				return reply.sendError(APIErrors.PERMISSION_ERROR);
+			}
+			const { uploadId } = request.params;
+
+			await prisma.meetingPreviewUpload.delete({
+				where: {
+					profileId_uploadId: {
+						profileId: profile.id,
+						uploadId: BigInt(uploadId),
+					},
+				},
+			});
+
+			return reply.send({
+				uploadId,
 			});
 		},
 	);

@@ -1,6 +1,10 @@
 import { Static, Type } from "@sinclair/typebox";
 import { assert, Equals } from "tsafe";
-import { MeetingContentType, MeetingType } from "@prisma/client";
+import {
+	MeetingContentType,
+	MeetingSettingsProgress,
+	MeetingType,
+} from "@prisma/client";
 import { UpdateVideoCallSettings } from "./schema.js";
 
 export const UpdateVideoCallSettingsValidator = Type.Object({
@@ -18,6 +22,7 @@ export const UpdateVideoCallSettingsValidator = Type.Object({
 				Type.Literal(MeetingContentType.EighteenPlusAdult),
 				Type.Literal(MeetingContentType.EighteenPlusSexual),
 				Type.Literal(MeetingContentType.Spirituality),
+				Type.Literal(MeetingContentType.Endorsement),
 			]),
 			{ uniqueItems: true },
 		),
@@ -31,6 +36,19 @@ export const UpdateVideoCallSettingsValidator = Type.Object({
 	notificationsByEmail: Type.Optional(Type.Boolean()),
 	notificationsByPhone: Type.Optional(Type.Boolean()),
 	videoCallsEnabled: Type.Optional(Type.Boolean()),
+	progress: Type.Optional(
+		Type.Union([
+			Type.Literal(MeetingSettingsProgress.None),
+			Type.Literal(MeetingSettingsProgress.Pricing),
+			Type.Literal(MeetingSettingsProgress.Availability),
+			Type.Literal(MeetingSettingsProgress.Content),
+			Type.Literal(MeetingSettingsProgress.Description),
+			Type.Literal(MeetingSettingsProgress.Notifications),
+			Type.Literal(MeetingSettingsProgress.Completed),
+		]),
+	),
+	timezone: Type.Optional(Type.String()),
+	vacationsEnabled: Type.Optional(Type.Boolean()),
 });
 assert<
 	Equals<

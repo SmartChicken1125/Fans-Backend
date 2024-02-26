@@ -86,7 +86,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				.set({
 					weekday: request.body.day + 1,
 				})
-				.toUTC();
+				.setZone("utc", { keepLocalTime: true });
 
 			const endDateTime = startDateTime.plus({
 				minutes: request.body.length,

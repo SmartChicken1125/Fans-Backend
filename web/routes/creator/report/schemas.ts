@@ -5,6 +5,7 @@ export interface UserReportCreateReqBody {
 	userId: string;
 	flag: ProfileReportFlag;
 	reason?: string;
+	thumbId?: string;
 }
 
 export interface UserReportProcessReqBody {

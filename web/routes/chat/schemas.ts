@@ -3,7 +3,12 @@
 // backend: web/routes/chat/schemas.ts
 
 import { MessageReportFlag } from "@prisma/client";
-import { IConversationMeta, IMedia, IMessage } from "../../CommonAPISchemas.js";
+import {
+	IConversationMeta,
+	IMedia,
+	IMessage,
+	MessageType,
+} from "../../CommonAPISchemas.js";
 
 export interface ChatPaginatedQuery {
 	page: number;
@@ -57,8 +62,10 @@ export interface ChatConversationMessagesPostReqBody {
 	messageType?: number;
 	content: string;
 	uploadIds?: string[];
-	parentId?: string;
+	previewUploadIds?: string[];
+	value?: string;
 	gif?: { source: "tenor" | "giphy"; id: string };
+	parentId?: string;
 }
 
 export interface ChatConversationMessagesPostRespBody extends IMessage {}
@@ -107,4 +114,15 @@ export interface ChannelMediaPageQuery {
 	page: number;
 	size: number;
 	type?: string;
+}
+
+export interface PurchaseChatPaidPostReqBody {
+	messageId: string;
+	customerPaymentProfileId: string;
+	fanReferralCode?: string;
+}
+
+export interface ChatPaidPostPriceReqQuery {
+	id: string;
+	customerPaymentProfileId?: string;
 }

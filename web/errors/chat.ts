@@ -8,4 +8,18 @@ export const chatAPIErrors = {
 			message: "Channel not found.",
 		},
 	},
+	VIDEO_CALL_IN_PROGRESS: {
+		status: 400,
+		data: {
+			code: errorCode(ErrorSource.Chat, 2),
+			message: "Video Call is already in progress.",
+		},
+	},
+	VIDEO_CALL_INTERNAL_ERROR: {
+		status: 500,
+		data: {
+			code: errorCode(ErrorSource.Chat, 3),
+			message: "Video Call error.",
+		},
+	},
 };

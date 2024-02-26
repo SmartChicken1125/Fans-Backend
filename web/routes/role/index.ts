@@ -20,11 +20,13 @@ import {
 	RoleUpdateReqBodyValidator,
 } from "./validation.js";
 import { ModelConverter } from "../../models/modelConverter.js";
+import XPService from "../../../common/service/XPService.js";
 
 export default async function routes(fastify: FastifyTypebox) {
 	const { container } = fastify;
 	const prisma = await container.resolve(PrismaService);
 	const snowflake = await container.resolve(SnowflakeService);
+	const xpService = await container.resolve(XPService);
 	const sessionManager = await container.resolve(SessionManagerService);
 	const maxObjectLimit = parseInt(process.env.MAX_OBJECT_LIMIT ?? "100");
 
@@ -166,9 +168,9 @@ export default async function routes(fastify: FastifyTypebox) {
 				data,
 			});
 
-			// if (data.level) {
-			// 	await xpService.handleUpdateRole(profile.id);
-			// }
+			if (data.level) {
+				await xpService.handleUpdateRole(profile.id);
+			}
 
 			return reply.status(200).send();
 		},

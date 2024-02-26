@@ -1,6 +1,6 @@
 import { Static, Type } from "@sinclair/typebox";
 import { assert, Equals } from "tsafe";
-import { GetAvailabilityQuery } from "./schemas.js";
+import { GetAvailabilityQuery, GetVideoCallPriceParams } from "./schemas.js";
 
 export const GetAvailabilityQueryValidator = Type.Object({
 	creatorId: Type.String(),
@@ -10,4 +10,16 @@ export const GetAvailabilityQueryValidator = Type.Object({
 });
 assert<
 	Equals<Static<typeof GetAvailabilityQueryValidator>, GetAvailabilityQuery>
+>();
+
+export const GetVideoCallPriceParamsValidator = Type.Object({
+	hostId: Type.String(),
+	duration: Type.Integer(),
+	customerPaymentProfileId: Type.Optional(Type.String()),
+});
+assert<
+	Equals<
+		Static<typeof GetVideoCallPriceParamsValidator>,
+		GetVideoCallPriceParams
+	>
 >();

@@ -14,7 +14,10 @@ import {
 import { Readable } from "stream";
 import sharp from "sharp";
 import { encode } from "blurhash";
-import { UploadStorageType } from "@prisma/client";
+import { Upload, UploadStorageType } from "@prisma/client";
+import archiver from "archiver";
+import { PassThrough } from "node:stream";
+import mime from "mime-types";
 
 type Multer = ReturnType<typeof multer>;
 
@@ -173,6 +176,30 @@ class MediaUploadService {
 			stream.on("error", (err) => reject(err));
 			stream.on("end", () => resolve(Buffer.concat(chunks)));
 		});
+	}
+
+	async getMultiFilesStream(uploads: Upload[]) {
+		const archive = archiver("zip", { zlib: { level: 5 } });
+		for (const upload of uploads.filter(
+			(u) => u.storage === UploadStorageType.S3,
+		)) {
+			const passthrough = new PassThrough();
+			const command = new GetObjectCommand({
+				Bucket: this.#bucket,
+				Key: upload.url,
+			});
+			const response = await this.#s3.send(command);
+
+			const extension = response.ContentType
+				? mime.extension(response.ContentType)
+				: "";
+			const filename = upload.url.replace(/^.*[\\/]/, "");
+			this.asStream(response).pipe(passthrough);
+			archive.append(passthrough, {
+				name: `${filename}${extension ? `.${extension}` : ""}`,
+			});
+		}
+		return archive;
 	}
 }
 

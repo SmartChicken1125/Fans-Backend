@@ -55,7 +55,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				data: {
 					id: snowflake.gen(),
 					length: request.body.length,
-					price: Number(Number(request.body.price).toFixed(2)),
+					price: request.body.price,
 					currency: request.body.currency,
 					creatorId: creator.id,
 					isEnabled: request.body.isEnabled ?? true,
@@ -103,6 +103,40 @@ export default async function routes(fastify: FastifyTypebox) {
 
 			const duration = await prisma.customVideoDuration.findFirst({
 				where: { id: BigInt(request.params.id), creatorId: creator.id },
+			});
+			if (!duration) {
+				return reply.sendError(APIErrors.CAMEO_DURATION_NOT_FOUND);
+			}
+
+			return reply.send(ModelConverter.toICameoDuration(duration));
+		},
+	);
+
+	fastify.put<{ Params: IdParams; Body: CreateCustomVideoDurationBody }>(
+		"/:id",
+		{
+			schema: {
+				params: IdParamsValidator,
+				body: CreateCustomVideoDurationBodyValidator,
+			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+				sessionManager.requireProfileHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session as Session;
+			const creator = (await session.getProfile(prisma))!;
+
+			const duration = await prisma.customVideoDuration.update({
+				where: { id: BigInt(request.params.id), creatorId: creator.id },
+				data: {
+					length: request.body.length,
+					price: request.body.price,
+					currency: request.body.currency,
+					isEnabled: request.body.isEnabled ?? true,
+				},
 			});
 			if (!duration) {
 				return reply.sendError(APIErrors.CAMEO_DURATION_NOT_FOUND);

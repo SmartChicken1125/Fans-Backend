@@ -1,3 +1,5 @@
+import { XPActionType } from "@prisma/client";
+
 export enum BlackWordType {
 	none,
 	site,
@@ -52,3 +54,41 @@ export const actions = [
 	"Poll",
 ] as const;
 export type ActionType = (typeof actions)[number];
+
+export const actionData = [
+	{
+		action: "Subscribe",
+		xp: 10,
+		type: XPActionType.Multiple,
+	},
+	{
+		action: "Donate",
+		xp: 10,
+		type: XPActionType.Multiple,
+	},
+	{
+		action: "Like",
+		xp: 3,
+		type: XPActionType.Add,
+	},
+	{
+		action: "Comment",
+		xp: 10,
+		type: XPActionType.Add,
+	},
+	{
+		action: "Share",
+		xp: 10,
+		type: XPActionType.Add,
+	},
+	{
+		action: "Purchase",
+		xp: 10,
+		type: XPActionType.Multiple,
+	},
+	{
+		action: "Poll",
+		xp: 5,
+		type: XPActionType.Add,
+	},
+];

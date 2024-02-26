@@ -21,6 +21,7 @@ import scheduledNotification from "./workers/scheduledNotification.js";
 import { startWatching } from "./emailTemplates/components/stylesheet.js";
 import scheduledMeeting from "./workers/scheduledMeeting.js";
 import scheduledCameo from "./workers/scheduledCameo.js";
+import scheduledVideoCall from "./workers/scheduledVideoCall.js";
 
 export default async function main(container: Container) {
 	container = container.clone();
@@ -32,6 +33,7 @@ export default async function main(container: Container) {
 	await scheduledNotification(container);
 	await scheduledMeeting(container);
 	await scheduledCameo(container);
+	await scheduledVideoCall(container);
 	await startWatching(container);
 
 	const host = process.env.HOST_API ?? "::";
@@ -174,6 +176,10 @@ export default async function main(container: Container) {
 
 	fastify.register(import("./routes/profile/report/index.js"), {
 		prefix: "/api/v1/profile/report",
+	});
+
+	fastify.register(import("./routes/profile/blockUser/index.js"), {
+		prefix: "/api/v1/profile/block-user",
 	});
 
 	fastify.register(import("./routes/profile/highlights/index.js"), {

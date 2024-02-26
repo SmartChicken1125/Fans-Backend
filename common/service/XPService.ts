@@ -2,7 +2,7 @@ import { User, XPActionType } from "@prisma/client";
 import { Injectable, Injector } from "async-injection";
 import PrismaService from "./PrismaService.js";
 import SnowflakeService from "./SnowflakeService.js";
-import { ActionType } from "../Define.js";
+import { ActionType, actionData } from "../Define.js";
 
 @Injectable()
 class XPService {
@@ -20,99 +20,111 @@ class XPService {
 		verifier?: User,
 		force: boolean = false,
 	) {
-		const xpAction = await this.prisma.xPAction.findFirst({
-			where: { action },
-		});
+		try {
+			let temp = await this.prisma.xPAction.findFirst({
+				where: { action },
+			});
 
-		if (!xpAction) {
-			throw new Error("Invalid action!");
-		}
-
-		if (!force) {
-			const verified = await this.verifyXPLog(xpAction.type, detail);
-			if (!verified) {
-				throw "Not verified";
+			if (!temp) {
+				if (actionData.find((v) => v.action === action)) {
+					await this.restoreActionData();
+					temp = await this.prisma.xPAction.findFirst({
+						where: { action },
+					});
+				} else throw new Error("Invalid action!");
 			}
-		}
 
-		const xp = xpAction.type === "Add" ? xpAction.xp : amount * xpAction.xp;
+			const xpAction = temp!;
 
-		const userLevel = await this.prisma.userLevel.findFirst({
-			where: {
-				creatorId: BigInt(creatorId),
-				userId: BigInt(userId),
-			},
-		});
-
-		const currentLevel = userLevel ? userLevel.level : 0;
-		const currentXp = userLevel ? userLevel.xp + xp : xp;
-		let nextLevel = currentLevel;
-		let nextXp = currentXp;
-		for (;;) {
-			if (nextLevel >= 100) break;
-			const requiredXp = (nextLevel + 1) * 5;
-			if (nextXp >= requiredXp) {
-				nextLevel++;
-				nextXp -= requiredXp;
-			} else {
-				break;
+			if (!force) {
+				const verified = await this.verifyXPLog(xpAction.type, detail);
+				if (!verified) {
+					throw "Not verified";
+				}
 			}
-		}
 
-		const roles = await this.prisma.role.findMany({
-			where: { profileId: creatorId },
-			orderBy: { level: "desc" },
-		});
-		let nextRoleId: bigint | undefined = undefined;
-		for (const role of roles) {
-			if (nextLevel >= role.level) {
-				nextRoleId = role.id;
-				break;
-			}
-		}
+			const xp =
+				xpAction.type === "Add" ? xpAction.xp : amount * xpAction.xp;
 
-		await this.prisma.$transaction(async (prisma) => {
-			await prisma.xPLog.create({
-				data: {
-					id: this.snowflake.gen(),
-					user: { connect: { id: userId } },
-					creator: { connect: { id: creatorId } },
-					action: xpAction.type,
-					amount,
-					xp,
-					verifiedAt: new Date(),
+			const userLevel = await this.prisma.userLevel.findFirst({
+				where: {
+					creatorId: BigInt(creatorId),
+					userId: BigInt(userId),
 				},
 			});
 
-			if (userLevel) {
-				await prisma.userLevel.update({
-					where: {
-						userId_creatorId: {
-							userId: BigInt(userId),
-							creatorId: BigInt(creatorId),
-						},
-					},
-					data: {
-						level: nextLevel,
-						xp: nextXp,
-						roleId: nextRoleId,
-					},
-				});
-			} else {
-				await prisma.userLevel.create({
+			const currentLevel = userLevel ? userLevel.level : 0;
+			const currentXp = userLevel ? userLevel.xp + xp : xp;
+			let nextLevel = currentLevel;
+			let nextXp = currentXp;
+			for (;;) {
+				if (nextLevel >= 100) break;
+				const requiredXp = (nextLevel + 1) * 5;
+				if (nextXp >= requiredXp) {
+					nextLevel++;
+					nextXp -= requiredXp;
+				} else {
+					break;
+				}
+			}
+
+			const roles = await this.prisma.role.findMany({
+				where: { profileId: creatorId },
+				orderBy: { level: "desc" },
+			});
+			let nextRoleId: bigint | undefined = undefined;
+			for (const role of roles) {
+				if (nextLevel >= role.level) {
+					nextRoleId = role.id;
+					break;
+				}
+			}
+
+			await this.prisma.$transaction(async (prisma) => {
+				await prisma.xPLog.create({
 					data: {
 						id: this.snowflake.gen(),
 						user: { connect: { id: userId } },
 						creator: { connect: { id: creatorId } },
-						level: nextLevel,
-						xp: nextXp,
-						role: nextRoleId
-							? { connect: { id: nextRoleId } }
-							: undefined,
+						action: xpAction.type,
+						amount,
+						xp,
+						verifiedAt: new Date(),
 					},
 				});
-			}
-		});
+
+				if (userLevel) {
+					await prisma.userLevel.update({
+						where: {
+							userId_creatorId: {
+								userId: BigInt(userId),
+								creatorId: BigInt(creatorId),
+							},
+						},
+						data: {
+							level: nextLevel,
+							xp: nextXp,
+							roleId: nextRoleId,
+						},
+					});
+				} else {
+					await prisma.userLevel.create({
+						data: {
+							id: this.snowflake.gen(),
+							user: { connect: { id: userId } },
+							creator: { connect: { id: creatorId } },
+							level: nextLevel,
+							xp: nextXp,
+							role: nextRoleId
+								? { connect: { id: nextRoleId } }
+								: undefined,
+						},
+					});
+				}
+			});
+		} catch (error) {
+			console.error("XP Error", error);
+		}
 	}
 
 	async handleUpdateRole(creatorId: bigint) {
@@ -165,6 +177,17 @@ class XPService {
 
 	async verifyXPLog(action: XPActionType, detail: any) {
 		return true;
+	}
+
+	async restoreActionData() {
+		const oldActions = await this.prisma.xPAction.findMany({});
+		const newActions = actionData.filter(
+			(v) => oldActions.findIndex((vv) => vv.action === v.action) === -1,
+		);
+
+		await this.prisma.xPAction.createMany({
+			data: newActions,
+		});
 	}
 }
 

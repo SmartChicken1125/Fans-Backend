@@ -104,18 +104,54 @@ interface IMessageCreateOptionsGif extends IMessageCreateOptionsBase {
 	parentId?: string;
 }
 
+interface IMessageCreateOptionsPaidPost extends IMessageCreateOptionsBase {
+	messageType: MessageType.PAID_POST;
+
+	/**
+	 * Message content. Must be less than 2000 characters and not empty.
+	 */
+	content?: string;
+
+	/**
+	 * Message content. Must be less than 2000 characters and not empty.
+	 */
+	value: number;
+
+	/**
+	 * IDs of the uploads to attach to the message. Must be between 1 and 4 and belong to the user.
+	 */
+	uploadIds: bigint[];
+
+	/**
+	 * IDs of the uploads to attach to the message. Must be between 1 and 4 and belong to the user.
+	 */
+	previewUploadIds?: bigint[];
+
+	/**
+	 * Transaction status.
+	 */
+	status?: TransactionStatus | null;
+
+	/**
+	 * ID of the message to reply to. Must belong to the same channel.
+	 */
+	parentId?: string;
+}
+
 /**
  * Options for creating a message.
  */
 export type IMessageCreateOptions =
 	| IMessageCreateOptionsText
 	| IMessageCreateOptionsMedia
-	| IMessageCreateOptionsGif;
+	| IMessageCreateOptionsGif
+	| IMessageCreateOptionsPaidPost;
 
 export interface MessageWithUser extends Message {
 	user: UserBasicParam;
 	uploads?: Upload[];
 	parentMessage?: MessageWithUser;
+	status: TransactionStatus | null;
 }
 
 /**
@@ -749,6 +785,81 @@ class InboxManagerService {
 						id: gif.id,
 					}),
 					messageType,
+					parentId: parentId ? BigInt(parentId) : undefined,
+				},
+			});
+		} else if (messageType === MessageType.PAID_POST) {
+			const { content, value, uploadIds, previewUploadIds } = options;
+
+			if (!value) {
+				throw new APIErrorException(
+					genericAPIErrors.INVALID_REQUEST("Empty value"),
+				);
+			}
+
+			if (!uploadIds.length || uploadIds.length > 4) {
+				throw new APIErrorException(
+					genericAPIErrors.INVALID_REQUEST(
+						"Incorrect number of uploads",
+					),
+				);
+			}
+
+			const uploads = await this.#prisma.upload.findMany({
+				where: {
+					id: {
+						in: uploadIds,
+					},
+					type: { in: [UploadType.Image, UploadType.Video] },
+					usage: UploadUsageType.CHAT,
+					userId,
+					completed: true,
+				},
+			});
+
+			if (uploads.length === 0) {
+				throw new APIErrorException(
+					genericAPIErrors.INVALID_REQUEST("Invalid upload IDs"),
+				);
+			}
+
+			const previewUploads = previewUploadIds
+				? await this.#prisma.upload.findMany({
+						where: {
+							id: {
+								in: previewUploadIds,
+							},
+							type: { in: [UploadType.Image, UploadType.Video] },
+							usage: UploadUsageType.CHAT,
+							userId,
+							completed: true,
+						},
+				  })
+				: [];
+
+			message = await this.#prisma.message.create({
+				include: {
+					uploads: true,
+					parentMessage: true,
+				},
+				data: {
+					id: this.#snowflake.gen(),
+					channelId,
+					userId,
+					content: content ?? "",
+					value,
+					messageType,
+					uploads: {
+						connect: uploads.map((u) => ({
+							id: BigInt(u.id),
+						})),
+					},
+					previewUploads: {
+						connect: previewUploads.map((u) => ({
+							id: BigInt(u.id),
+						})),
+					},
+					status: TransactionStatus.Submitted,
 					parentId: parentId ? BigInt(parentId) : undefined,
 				},
 			});

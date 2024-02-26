@@ -1,8 +1,9 @@
 import "reflect-metadata";
 
-import { PrismaClient, XPActionType } from "@prisma/client";
+import { PrismaClient } from "@prisma/client";
 import { generatePasswordHashSalt } from "../common/auth/Hashing.js";
 import SnowflakeService from "../common/service/SnowflakeService.js";
+import { actionData } from "../common/Define.js";
 
 // All command line operations use reserved NodeID = 0x3ff, there's nearly zero chance of collision,
 // unless we somehow happen to run them at the same time.
@@ -12,44 +13,6 @@ const prisma = new PrismaClient();
 
 const seedInitialData = async () => {
 	const now = new Date();
-
-	const actions = [
-		{
-			action: "Subscribe",
-			xp: 10,
-			type: XPActionType.Multiple,
-		},
-		{
-			action: "Donate",
-			xp: 10,
-			type: XPActionType.Multiple,
-		},
-		{
-			action: "Like",
-			xp: 3,
-			type: XPActionType.Add,
-		},
-		{
-			action: "Comment",
-			xp: 10,
-			type: XPActionType.Add,
-		},
-		{
-			action: "Share",
-			xp: 10,
-			type: XPActionType.Add,
-		},
-		{
-			action: "Purchase",
-			xp: 10,
-			type: XPActionType.Multiple,
-		},
-		{
-			action: "Poll",
-			xp: 5,
-			type: XPActionType.Add,
-		},
-	];
 
 	await Promise.all([
 		prisma.user.create({
@@ -73,9 +36,15 @@ const seedInitialData = async () => {
 				verifiedAt: now,
 			},
 		}),
-		prisma.xPAction.createMany({
-			data: actions,
-		}),
+		actionData.map((action) =>
+			prisma.xPAction.upsert({
+				where: { action: action.action },
+				update: {},
+				create: {
+					...action,
+				},
+			}),
+		),
 	]);
 };
 

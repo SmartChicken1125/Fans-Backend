@@ -84,6 +84,9 @@ import { chimeFactory, ChimeService } from "./common/service/ChimeService.js";
 import { MeetingService } from "./common/service/MeetingService.js";
 import { PaymentService } from "./common/service/PaymentService.js";
 import XPService, { xpServiceFactory } from "./common/service/XPService.js";
+import LinkPreviewService, {
+	linkPreviewServiceFactory,
+} from "./common/service/LinkPreviewService.js";
 import { CameoService } from "./common/service/CameoService.js";
 
 dotenv.config();
@@ -198,6 +201,9 @@ container.bindAsyncFactory(ChimeService, chimeFactory).asSingleton();
 container.bindAsyncFactory(XPService, xpServiceFactory).asSingleton();
 container.bindClass(MeetingService).asSingleton();
 container.bindClass(PaymentService).asSingleton();
+container
+	.bindAsyncFactory(LinkPreviewService, linkPreviewServiceFactory)
+	.asSingleton();
 container.bindClass(CameoService).asSingleton();
 
 for (let service of services) {

@@ -550,29 +550,41 @@ export default async function routes(fastify: FastifyTypebox) {
 				return reply.sendError(APIErrors.ITEM_NOT_FOUND("Profile"));
 			}
 
-			const [bookmarks, comments, postLikes, storyComments, storyLikes] =
-				await Promise.all([
-					prisma.bookmark.findMany({
-						where: { userId: BigInt(session.userId) },
-						select: { postId: true },
-					}),
-					prisma.comment.findMany({
-						where: { userId: BigInt(session.userId) },
-						select: { postId: true },
-					}),
-					prisma.postLike.findMany({
-						where: { userId: BigInt(session.userId) },
-						select: { postId: true },
-					}),
-					prisma.storyComment.findMany({
-						where: { userId: BigInt(session.userId) },
-						select: { storyId: true },
-					}),
-					prisma.storyLike.findMany({
-						where: { userId: BigInt(session.userId) },
-						select: { storyId: true },
-					}),
-				]);
+			const [
+				bookmarks,
+				comments,
+				postLikes,
+				storyComments,
+				storyLikes,
+				blockCount,
+			] = await Promise.all([
+				prisma.bookmark.findMany({
+					where: { userId: BigInt(session.userId) },
+					select: { postId: true },
+				}),
+				prisma.comment.findMany({
+					where: { userId: BigInt(session.userId) },
+					select: { postId: true },
+				}),
+				prisma.postLike.findMany({
+					where: { userId: BigInt(session.userId) },
+					select: { postId: true },
+				}),
+				prisma.storyComment.findMany({
+					where: { userId: BigInt(session.userId) },
+					select: { storyId: true },
+				}),
+				prisma.storyLike.findMany({
+					where: { userId: BigInt(session.userId) },
+					select: { storyId: true },
+				}),
+				prisma.blockedUser.count({
+					where: {
+						userId: BigInt(session.userId),
+						creatorId: profile.id,
+					},
+				}),
+			]);
 
 			const result: ProfileRespBody = {
 				...ModelConverter.toIProfile(profile),
@@ -640,6 +652,7 @@ export default async function routes(fastify: FastifyTypebox) {
 						ModelConverter.toIUpload(u.upload),
 					),
 				})),
+				isBlocked: blockCount > 0,
 			};
 			return reply.send(result);
 		},
@@ -778,7 +791,6 @@ export default async function routes(fastify: FastifyTypebox) {
 		},
 		async (request, reply) => {
 			const session = request.session;
-			const selfProfile = await session?.getProfile(prisma);
 			const { link } = request.params;
 
 			// get profile by profile-link
@@ -848,77 +860,162 @@ export default async function routes(fastify: FastifyTypebox) {
 				return reply.sendError(APIErrors.ITEM_NOT_FOUND("Profile"));
 			}
 
-			const [videoCount, imageCount, subscriptionCount, review] =
-				await Promise.all([
-					prisma.upload.count({
+			if (session) {
+				const requestingUser =
+					(await session.getUserWithProfile(prisma))!;
+				const isSelf = requestingUser.profile?.id === profile.id;
+
+				const paidPostTransactions =
+					await prisma.paidPostTransaction.findMany({
 						where: {
-							usage: UploadUsageType.POST,
-							type: UploadType.Video,
-							postMedias: {
-								some: {
-									post: {
-										profileId: profile.id,
-										isArchived: false,
-										isPosted: true,
-									},
-								},
-							},
-						},
-					}),
-					prisma.upload.count({
-						where: {
-							usage: UploadUsageType.POST,
-							type: UploadType.Image,
-							postMedias: {
-								some: {
-									post: {
-										profileId: profile.id,
-										isArchived: false,
-										isPosted: true,
-									},
-								},
-							},
-						},
-					}),
-					prisma.paymentSubscription.count({
-						where: {
-							creatorId: profile?.id,
-							OR: [
-								{
-									status: SubscriptionStatus.Active,
-								},
-								{
-									endDate: {
-										gte: new Date(),
-									},
-								},
-							],
-						},
-					}),
-					prisma.review.aggregate({
-						_avg: {
-							score: true,
-						},
-						_count: {
-							score: true,
-						},
-						where: {
+							userId: BigInt(session.userId),
 							creatorId: profile.id,
+							status: { in: [TransactionStatus.Successful] },
 						},
-					}),
-				]);
+						select: { paidPost: true },
+					});
 
-			const hasAccess = session
-				? await checkAccess(
-						prisma,
-						BigInt(session.userId),
-						profile.userId,
-						profile.id,
-				  )
-				: false;
+				const paidOutPostIds = paidPostTransactions.map(
+					(ppt) => ppt.paidPost.postId,
+				);
 
-			const [bookmarks, comments, postLikes, paidPostTransactions] =
-				session && hasAccess
+				const postCondition = {
+					profileId: profile.id,
+					isArchived: false,
+					isPosted: true,
+					AND: isSelf
+						? undefined
+						: [
+								{
+									OR: [
+										{ isPaidPost: false },
+										{
+											isPaidPost: true,
+											id: { in: paidOutPostIds },
+										},
+									],
+								},
+								{
+									OR: [
+										{
+											AND: [
+												{
+													roles: {
+														none: {},
+													},
+													tiers: {
+														none: {},
+													},
+													users: {
+														none: {},
+													},
+												},
+											],
+										},
+										{
+											roles: {
+												some: {
+													role: {
+														userLevels: {
+															some: {
+																userId: BigInt(
+																	requestingUser.id,
+																),
+															},
+														},
+													},
+												},
+											},
+										},
+										{
+											tiers: {
+												some: {
+													tier: {
+														paymentSubscriptions: {
+															some: {
+																userId: BigInt(
+																	requestingUser.id,
+																),
+																status: SubscriptionStatus.Active,
+															},
+														},
+													},
+												},
+											},
+										},
+										{
+											users: {
+												some: {
+													user: {
+														id: BigInt(
+															requestingUser.id,
+														),
+													},
+												},
+											},
+										},
+									],
+								},
+						  ],
+				};
+
+				const [videoCount, imageCount, subscriptionCount, review] =
+					await Promise.all([
+						prisma.upload.count({
+							where: {
+								usage: UploadUsageType.POST,
+								type: UploadType.Video,
+								postMedias: {
+									some: {
+										post: postCondition,
+									},
+								},
+							},
+						}),
+						prisma.upload.count({
+							where: {
+								usage: UploadUsageType.POST,
+								type: UploadType.Image,
+								postMedias: {
+									some: {
+										post: postCondition,
+									},
+								},
+							},
+						}),
+						prisma.paymentSubscription.count({
+							where: {
+								creatorId: profile?.id,
+								OR: [
+									{ status: SubscriptionStatus.Active },
+									{ endDate: { gte: new Date() } },
+								],
+							},
+						}),
+						prisma.review.aggregate({
+							_avg: { score: true },
+							_count: { score: true },
+							where: { creatorId: profile.id },
+						}),
+					]);
+
+				const isBlocked = session
+					? (await prisma.blockedUser.count({
+							where: {
+								userId: BigInt(session.userId),
+								creatorId: profile.id,
+							},
+					  })) > 0
+					: undefined;
+
+				const hasAccess = await checkAccess(
+					prisma,
+					BigInt(session.userId),
+					profile.userId,
+					profile.id,
+				);
+
+				const [bookmarks, comments, postLikes] = hasAccess
 					? await Promise.all([
 							prisma.bookmark.findMany({
 								where: { userId: BigInt(session.userId) },
@@ -932,83 +1029,182 @@ export default async function routes(fastify: FastifyTypebox) {
 								where: { userId: BigInt(session.userId) },
 								select: { postId: true },
 							}),
-							prisma.paidPostTransaction.findMany({
-								where: {
-									userId: BigInt(session.userId),
-									status: {
-										in: [TransactionStatus.Successful],
+					  ])
+					: [[], [], []];
+
+				const result: ProfileRespBody = {
+					...ModelConverter.toIProfile(profile),
+					socialLinks: profile.socialLinks.map((s) =>
+						ModelConverter.toISocialLink(s),
+					),
+					categories: profile.categories.map((c) =>
+						ModelConverter.toICategory(c),
+					),
+					subscriptions: profile.subscriptions.map((s) => ({
+						...ModelConverter.toISubscription(s),
+						campaigns: s.campaigns.map((c) =>
+							ModelConverter.toICampaign(c),
+						),
+						bundles: s.bundles.map((b) =>
+							ModelConverter.toIBundle(b),
+						),
+					})),
+					tiers: profile.tiers.map((t) => ModelConverter.toITier(t)),
+					user: profile.user
+						? ModelConverter.toIUser(profile.user)
+						: undefined,
+					highlights: profile.highlights.map((h) =>
+						ModelConverter.toIHighlight(h),
+					),
+					previews: profile.previews.map((p) =>
+						ModelConverter.toIProfilePreview(p),
+					),
+					playlists: profile.playlists.map((pl) => ({
+						...ModelConverter.toIPlaylist(pl),
+						posts: pl.posts.map((p) =>
+							ModelConverter.toIPost(p.post, {
+								isBookmarked: bookmarks
+									.map((b) => b.postId)
+									.includes(p.postId),
+								isCommented: comments
+									.map((c) => c.postId)
+									.includes(p.postId),
+								isLiked: postLikes
+									.map((p) => p.postId)
+									.includes(p.postId),
+								isPaidOut: paidPostTransactions
+									.map((ppt) => ppt.paidPost.postId)
+									.includes(p.postId),
+								isSelf,
+								isExclusive:
+									p.post.roles.length > 0 ||
+									p.post.tiers.length > 0 ||
+									p.post.users.length > 0,
+							}),
+						),
+						uploads: pl.uploads.map((u) =>
+							ModelConverter.toIUpload(u.upload),
+						),
+					})),
+					fanReferrals: profile.fanReferrals.map((f) =>
+						ModelConverter.toIFanReferral(f),
+					),
+					imageCount,
+					videoCount,
+					subscriptionCount,
+					hasAccess,
+					isBlocked,
+					review: {
+						total: review._count.score,
+						score: review._avg.score ?? 0,
+					},
+				};
+				return reply.send(result);
+			} else {
+				const [videoCount, imageCount, subscriptionCount, review] =
+					await Promise.all([
+						prisma.upload.count({
+							where: {
+								usage: UploadUsageType.POST,
+								type: UploadType.Video,
+								postMedias: {
+									some: {
+										post: {
+											profileId: profile.id,
+											isArchived: false,
+											isPosted: true,
+										},
 									},
 								},
-								select: { paidPost: true },
-							}),
-					  ])
-					: [[], [], [], []];
-
-			const result: ProfileRespBody = {
-				...ModelConverter.toIProfile(profile),
-				socialLinks: profile.socialLinks.map((s) =>
-					ModelConverter.toISocialLink(s),
-				),
-				categories: profile.categories.map((c) =>
-					ModelConverter.toICategory(c),
-				),
-				subscriptions: profile.subscriptions.map((s) => ({
-					...ModelConverter.toISubscription(s),
-					campaigns: s.campaigns.map((c) =>
-						ModelConverter.toICampaign(c),
-					),
-					bundles: s.bundles.map((b) => ModelConverter.toIBundle(b)),
-				})),
-				tiers: profile.tiers.map((t) => ModelConverter.toITier(t)),
-				user: profile.user
-					? ModelConverter.toIUser(profile.user)
-					: undefined,
-				highlights: profile.highlights.map((h) =>
-					ModelConverter.toIHighlight(h),
-				),
-				previews: profile.previews.map((p) =>
-					ModelConverter.toIProfilePreview(p),
-				),
-				playlists: profile.playlists.map((pl) => ({
-					...ModelConverter.toIPlaylist(pl),
-					posts: pl.posts.map((p) =>
-						ModelConverter.toIPost(p.post, {
-							isBookmarked: bookmarks
-								.map((b) => b.postId)
-								.includes(p.postId),
-							isCommented: comments
-								.map((c) => c.postId)
-								.includes(p.postId),
-							isLiked: postLikes
-								.map((p) => p.postId)
-								.includes(p.postId),
-							isPaidOut: paidPostTransactions
-								.map((ppt) => ppt.paidPost.postId)
-								.includes(p.postId),
-							isSelf: p.post.profileId === selfProfile?.id,
-							isExclusive:
-								p.post.roles.length > 0 ||
-								p.post.tiers.length > 0 ||
-								p.post.users.length > 0,
+							},
 						}),
+						prisma.upload.count({
+							where: {
+								usage: UploadUsageType.POST,
+								type: UploadType.Image,
+								postMedias: {
+									some: {
+										post: {
+											profileId: profile.id,
+											isArchived: false,
+											isPosted: true,
+										},
+									},
+								},
+							},
+						}),
+						prisma.paymentSubscription.count({
+							where: {
+								creatorId: profile?.id,
+								OR: [
+									{ status: SubscriptionStatus.Active },
+									{ endDate: { gte: new Date() } },
+								],
+							},
+						}),
+						prisma.review.aggregate({
+							_avg: { score: true },
+							_count: { score: true },
+							where: { creatorId: profile.id },
+						}),
+					]);
+
+				const hasAccess = false;
+				const result: ProfileRespBody = {
+					...ModelConverter.toIProfile(profile),
+					socialLinks: profile.socialLinks.map((s) =>
+						ModelConverter.toISocialLink(s),
 					),
-					uploads: pl.uploads.map((u) =>
-						ModelConverter.toIUpload(u.upload),
+					categories: profile.categories.map((c) =>
+						ModelConverter.toICategory(c),
 					),
-				})),
-				fanReferrals: profile.fanReferrals.map((f) =>
-					ModelConverter.toIFanReferral(f),
-				),
-				imageCount,
-				videoCount,
-				subscriptionCount,
-				hasAccess,
-				review: {
-					total: review._count.score,
-					score: review._avg.score ?? 0,
-				},
-			};
-			return reply.send(result);
+					subscriptions: profile.subscriptions.map((s) => ({
+						...ModelConverter.toISubscription(s),
+						campaigns: s.campaigns.map((c) =>
+							ModelConverter.toICampaign(c),
+						),
+						bundles: s.bundles.map((b) =>
+							ModelConverter.toIBundle(b),
+						),
+					})),
+					tiers: profile.tiers.map((t) => ModelConverter.toITier(t)),
+					user: profile.user
+						? ModelConverter.toIUser(profile.user)
+						: undefined,
+					highlights: profile.highlights.map((h) =>
+						ModelConverter.toIHighlight(h),
+					),
+					previews: profile.previews.map((p) =>
+						ModelConverter.toIProfilePreview(p),
+					),
+					playlists: profile.playlists.map((pl) => ({
+						...ModelConverter.toIPlaylist(pl),
+						posts: pl.posts.map((p) =>
+							ModelConverter.toIPost(p.post, {
+								isExclusive:
+									p.post.roles.length > 0 ||
+									p.post.tiers.length > 0 ||
+									p.post.users.length > 0,
+							}),
+						),
+						uploads: pl.uploads.map((u) =>
+							ModelConverter.toIUpload(u.upload),
+						),
+					})),
+					fanReferrals: profile.fanReferrals.map((f) =>
+						ModelConverter.toIFanReferral(f),
+					),
+					imageCount,
+					videoCount,
+					subscriptionCount,
+					hasAccess,
+					review: {
+						total: review._count.score,
+						score: review._avg.score ?? 0,
+					},
+				};
+				return reply.send(result);
+			}
 		},
 	);
 

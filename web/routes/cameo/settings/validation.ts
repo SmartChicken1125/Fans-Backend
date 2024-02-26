@@ -1,7 +1,11 @@
 import { Static, Type } from "@sinclair/typebox";
 import { assert, Equals } from "tsafe";
-import { UpdateCameoSettings } from "./schemas.js";
-import { CameoContentType, CameoVolumeTimeUnit } from "@prisma/client";
+import {
+	CameoContentType,
+	CameoSettingsProgress,
+	CameoVolumeTimeUnit,
+} from "@prisma/client";
+import { CameoPreviewUploadParams, UpdateCameoSettings } from "./schemas.js";
 
 export const UpdateCameoPreferencesValidator = Type.Object({
 	volumeLimit: Type.Optional(
@@ -34,12 +38,36 @@ export const UpdateCameoPreferencesValidator = Type.Object({
 	agreedToTerms: Type.Optional(Type.Boolean()),
 	notificationNewRequests: Type.Optional(Type.Boolean()),
 	notificationPendingVideos: Type.Optional(Type.Boolean()),
+	notificationCancelledVideos: Type.Optional(Type.Boolean()),
 	notificationCompletedRequests: Type.Optional(Type.Boolean()),
 	notificationsByEmail: Type.Optional(Type.Boolean()),
 	notificationsByPhone: Type.Optional(Type.Boolean()),
 	customVideoEnabled: Type.Optional(Type.Boolean()),
+	showReviews: Type.Optional(Type.Boolean()),
+	progress: Type.Optional(
+		Type.Union([
+			Type.Literal(CameoSettingsProgress.None),
+			Type.Literal(CameoSettingsProgress.Pricing),
+			Type.Literal(CameoSettingsProgress.Content),
+			Type.Literal(CameoSettingsProgress.RequestLimits),
+			Type.Literal(CameoSettingsProgress.Description),
+			Type.Literal(CameoSettingsProgress.Notifications),
+			Type.Literal(CameoSettingsProgress.Completed),
+		]),
+	),
 });
 
 assert<
 	Equals<Static<typeof UpdateCameoPreferencesValidator>, UpdateCameoSettings>
+>();
+
+export const CameoPreviewUploadParamsValidator = Type.Object({
+	uploadId: Type.String({ format: "snowflake" }),
+});
+
+assert<
+	Equals<
+		Static<typeof CameoPreviewUploadParamsValidator>,
+		CameoPreviewUploadParams
+	>
 >();

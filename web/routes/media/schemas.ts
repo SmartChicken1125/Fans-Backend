@@ -15,6 +15,11 @@ export interface MediaTypeParam {
 
 export type MediaRespBody = IMedia;
 
+export enum SortType {
+	latest = "latest",
+	oldest = "oldest",
+}
+
 export interface MediasRespBody {
 	medias: IMedia[];
 	page: number;
@@ -47,7 +52,12 @@ export interface FinishUploadReqBody {
 }
 
 export interface PostMediaPageQuery {
+	sort?: SortType;
 	type?: UploadType;
 	page?: number;
 	size?: number;
+}
+
+export interface DownloadMediasReqBody {
+	mediaIds: string[];
 }

@@ -63,6 +63,12 @@ export const ProfileUpdateReqBodyValidator = Type.Object({
 	isFanReferralEnabled: Type.Optional(Type.Boolean()),
 	fanReferralShare: Type.Optional(Type.Number()),
 	marketingContentLink: Type.Optional(Type.String()),
+	hideTips: Type.Optional(Type.Boolean()),
+	hideLikes: Type.Optional(Type.Boolean()),
+	hideComments: Type.Optional(Type.Boolean()),
+	explicitCommentFilter: Type.Optional(Type.Boolean()),
+	watermark: Type.Optional(Type.Boolean()),
+	isAllowedScreenshot: Type.Optional(Type.Boolean()),
 	isDisplayShop: Type.Optional(Type.Boolean()),
 	isDisplayReview: Type.Optional(Type.Boolean()),
 });

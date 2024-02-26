@@ -206,10 +206,12 @@ export default async function routes(
 
 		if (subscription) {
 			amountDinero = dinero({
-				amount: Math.round(subscription.price * 100),
+				amount: Math.round(subscription.price * DECIMAL_TO_CENT_FACTOR),
 			});
 		} else if (tier) {
-			amountDinero = dinero({ amount: Math.round(tier.price * 100) });
+			amountDinero = dinero({
+				amount: Math.round(tier.price * DECIMAL_TO_CENT_FACTOR),
+			});
 		} else {
 			return;
 		}
@@ -703,11 +705,7 @@ export default async function routes(
 				},
 			});
 
-			try {
-				await xpService.addXPLog("Subscribe", 0, user.id, creatorId);
-			} catch (error) {
-				console.error("XP Error", error);
-			}
+			await xpService.addXPLog("Subscribe", 0, user.id, creatorId);
 
 			(async () => {
 				const creator = await prisma.profile.findUnique({

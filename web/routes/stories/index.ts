@@ -12,18 +12,24 @@ import APIErrors from "../../errors/index.js";
 import { ModelConverter } from "../../models/modelConverter.js";
 import { FastifyTypebox } from "../../types.js";
 import {
+	LinkParams,
 	StoriesRespBody,
 	StoryCreateReqBody,
 	StoryFeedRespBody,
 	StoryRespBody,
 } from "./schemas.js";
-import { StoryCreateReqBodyValidator } from "./validation.js";
+import {
+	LinkParamsValidator,
+	StoryCreateReqBodyValidator,
+} from "./validation.js";
+import LinkPreviewService from "../../../common/service/LinkPreviewService.js";
 
 export default async function routes(fastify: FastifyTypebox) {
 	const { container } = fastify;
 	const prisma = await container.resolve(PrismaService);
 	const snowflake = await container.resolve(SnowflakeService);
 	const sessionManager = await container.resolve(SessionManagerService);
+	const linkPreview = await container.resolve(LinkPreviewService);
 	const maxObjectLimit = parseInt(process.env.MAX_OBJECT_LIMIT ?? "100");
 
 	// Get all stories
@@ -65,6 +71,7 @@ export default async function routes(fastify: FastifyTypebox) {
 							include: { creator: true },
 						},
 						storyUrls: true,
+						storyTexts: true,
 					},
 					skip: (page - 1) * size,
 					take: size,
@@ -121,7 +128,7 @@ export default async function routes(fastify: FastifyTypebox) {
 						include: { creator: true },
 					},
 					storyUrls: true,
-
+					storyTexts: true,
 					_count: {
 						select: { storyComments: true, storyLikes: true },
 					},
@@ -172,7 +179,7 @@ export default async function routes(fastify: FastifyTypebox) {
 		async (request, reply) => {
 			const session = request.session!;
 			const profile = (await session.getProfile(prisma))!;
-			const { mediaId } = request.body;
+			const { mediaId, storyTags, storyUrls, storyTexts } = request.body;
 
 			const storyCount = await prisma.story.count({
 				where: { profileId: profile.id },
@@ -188,8 +195,60 @@ export default async function routes(fastify: FastifyTypebox) {
 					profileId: profile.id,
 					isHighlight: false,
 					uploadId: BigInt(mediaId),
+					storyTexts:
+						storyTexts && storyTexts.length > 0
+							? {
+									createMany: {
+										data: storyTexts.map((st) => ({
+											id: snowflake.gen(),
+											text: st.text,
+											color: st.color,
+											font: st.font,
+											pointX: st.pointX,
+											pointY: st.pointY,
+										})),
+									},
+							  }
+							: undefined,
+					storyTags:
+						storyTags && storyTags.length > 0
+							? {
+									createMany: {
+										data: storyTags.map((st) => ({
+											id: snowflake.gen(),
+											creatorId: BigInt(st.creatorId),
+											color: st.color,
+											pointX: st.pointX,
+											pointY: st.pointY,
+										})),
+									},
+							  }
+							: undefined,
+					storyUrls:
+						storyUrls && storyUrls.length > 0
+							? {
+									createMany: {
+										data: storyUrls.map((su) => ({
+											id: snowflake.gen(),
+											url: su.url,
+											pointX: su.pointX,
+											pointY: su.pointY,
+										})),
+									},
+							  }
+							: undefined,
 				},
-				include: { upload: true },
+				include: {
+					upload: true,
+					storyTags: {
+						include: { creator: true },
+					},
+					storyUrls: true,
+					storyTexts: true,
+					_count: {
+						select: { storyComments: true, storyLikes: true },
+					},
+				},
 			});
 
 			await prisma.storyViewer.deleteMany({
@@ -341,6 +400,7 @@ export default async function routes(fastify: FastifyTypebox) {
 									include: { creator: true },
 								},
 								storyUrls: true,
+								storyTexts: true,
 								_count: {
 									select: {
 										storyComments: true,
@@ -444,6 +504,7 @@ export default async function routes(fastify: FastifyTypebox) {
 							include: { creator: true },
 						},
 						storyUrls: true,
+						storyTexts: true,
 						_count: {
 							select: {
 								storyComments: true,
@@ -534,7 +595,7 @@ export default async function routes(fastify: FastifyTypebox) {
 						include: { creator: true },
 					},
 					storyUrls: true,
-
+					storyTexts: true,
 					_count: {
 						select: { storyComments: true, storyLikes: true },
 					},
@@ -615,6 +676,7 @@ export default async function routes(fastify: FastifyTypebox) {
 						include: { creator: true },
 					},
 					storyUrls: true,
+					storyTexts: true,
 					_count: {
 						select: { storyComments: true, storyLikes: true },
 					},
@@ -681,6 +743,7 @@ export default async function routes(fastify: FastifyTypebox) {
 						include: { creator: true },
 					},
 					storyUrls: true,
+					storyTexts: true,
 					_count: {
 						select: {
 							storyComments: true,
@@ -757,6 +820,25 @@ export default async function routes(fastify: FastifyTypebox) {
 			});
 
 			return reply.status(200).send();
+		},
+	);
+
+	fastify.get<{ Querystring: LinkParams }>(
+		"/preview",
+		{
+			schema: {
+				querystring: LinkParamsValidator,
+			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+				sessionManager.requireProfileHandler,
+			],
+		},
+		async (request, reply) => {
+			const { link } = request.query;
+			const response = await linkPreview.getPreview(link);
+			return reply.send(response);
 		},
 	);
 }

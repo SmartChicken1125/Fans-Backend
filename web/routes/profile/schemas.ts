@@ -55,6 +55,12 @@ export interface ProfileUpdateReqBody {
 	isFanReferralEnabled?: boolean;
 	fanReferralShare?: number;
 	marketingContentLink?: string;
+	hideTips?: boolean;
+	hideLikes?: boolean;
+	hideComments?: boolean;
+	explicitCommentFilter?: boolean;
+	watermark?: boolean;
+	isAllowedScreenshot?: boolean;
 	isDisplayShop?: boolean;
 	isDisplayReview?: boolean;
 }
@@ -97,6 +103,7 @@ export interface ProfileRespBody extends IProfile {
 	playlists?: IPlayList[];
 	fanReferrals?: IFanReferral[];
 	hasAccess?: boolean;
+	isBlocked?: boolean;
 	review?: {
 		total: number;
 		score: number;

@@ -33,16 +33,24 @@ import {
 } from "../../../../common/rpc/CameoRPC.js";
 import RPCManagerService from "../../../../common/service/RPCManagerService.js";
 import {
+	IMediaImageVideoUpload,
+	IMediaVideoUpload,
+} from "../../../CommonAPISchemas.js";
+import {
 	CreateCustomVideoOrderBody,
 	CreateCustomVideoOrderReview,
+	VideoOrderParams,
 	OrdersQuery,
-	UpdateCustomVideoUpload,
+	CreateCustomVideoUploadBody,
+	VideoOrderUploadParams,
 } from "./schemas.js";
 import {
 	CreateCustomVideoOrderBodyValidator,
 	CreateCustomVideoOrderReviewValidator,
+	CreateCustomVideoUploadBodyValidator,
+	VideoOrderParamsValidator,
 	OrdersQueryValidator,
-	UpdateCustomVideoUploadValidator,
+	VideoOrderUploadParamsValidator,
 } from "./validation.js";
 
 export default async function routes(fastify: FastifyTypebox) {
@@ -387,10 +395,11 @@ export default async function routes(fastify: FastifyTypebox) {
 		},
 		async (request, reply) => {
 			const session = request.session as Session;
+			const { id: orderId } = request.params;
 
 			const order = await prisma.customVideoOrder.findFirst({
-				where: { id: BigInt(request.params.id) },
-				include: { creator: true, videoUpload: true },
+				where: { id: BigInt(orderId) },
+				include: { creator: true, fan: true },
 			});
 			if (!order) {
 				return reply.sendError(APIErrors.CAMEO_ORDER_NOT_FOUND);
@@ -403,10 +412,26 @@ export default async function routes(fastify: FastifyTypebox) {
 				return reply.sendError(APIErrors.PERMISSION_ERROR);
 			}
 
+			const requestUploads =
+				await prisma.customVideoOrderRequestUpload.findMany({
+					where: { orderId: BigInt(orderId) },
+					include: { upload: true },
+				});
+
+			const responseUploads =
+				await prisma.customVideoOrderResponseUpload.findMany({
+					where: { orderId: BigInt(orderId) },
+					include: { upload: true },
+				});
+
 			const result = await ModelConverter.toICustomVideoOrder(
 				cloudflareStream,
 				mediaService,
-			)(order);
+			)({
+				...order,
+				mediaRequests: requestUploads.map((data) => data.upload),
+				mediaResponses: responseUploads.map((data) => data.upload),
+			});
 			return reply.send(result);
 		},
 	);
@@ -535,7 +560,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				orderBy,
 				take: size,
 				skip: (page - 1) * size,
-				include: { videoUpload: true },
+				include: { videoUpload: true, creator: true, fan: true },
 			});
 
 			const results = await Promise.all(
@@ -557,15 +582,15 @@ export default async function routes(fastify: FastifyTypebox) {
 		},
 	);
 
-	fastify.put<{
-		Params: IdParams;
-		Body: UpdateCustomVideoUpload;
+	fastify.post<{
+		Params: VideoOrderParams;
+		Body: CreateCustomVideoUploadBody;
 	}>(
-		"/:id/video",
+		"/:orderId/media-responses",
 		{
 			schema: {
-				params: IdParamsValidator,
-				body: UpdateCustomVideoUploadValidator,
+				params: VideoOrderParamsValidator,
+				body: CreateCustomVideoUploadBodyValidator,
 			},
 			preHandler: [
 				sessionManager.sessionPreHandler,
@@ -575,9 +600,11 @@ export default async function routes(fastify: FastifyTypebox) {
 		},
 		async (request, reply) => {
 			const session = request.session as Session;
+			const { orderId } = request.params;
+			const { uploadId } = request.body;
 
 			const order = await prisma.customVideoOrder.findFirst({
-				where: { id: BigInt(request.params.id) },
+				where: { id: BigInt(orderId) },
 				include: { creator: true },
 			});
 			if (!order) {
@@ -588,7 +615,7 @@ export default async function routes(fastify: FastifyTypebox) {
 			}
 
 			const upload = await prisma.upload.findFirst({
-				where: { id: BigInt(request.body.uploadId) },
+				where: { id: BigInt(uploadId) },
 				select: { id: true, userId: true, usage: true, type: true },
 			});
 			if (!upload || upload.userId !== BigInt(session.userId)) {
@@ -605,13 +632,373 @@ export default async function routes(fastify: FastifyTypebox) {
 				);
 			}
 
-			await prisma.customVideoOrder.update({
-				where: { id: BigInt(request.params.id) },
-				data: { videoUploadId: upload.id },
+			await prisma.customVideoOrderResponseUpload.create({
+				data: { uploadId: upload.id, orderId: order.id },
 			});
 
 			return reply.send({
-				uploadId: String(upload.id),
+				uploadId,
+			});
+		},
+	);
+
+	fastify.get<{
+		Params: VideoOrderUploadParams;
+		Reply: IMediaVideoUpload;
+	}>(
+		"/:orderId/media-responses/:uploadId",
+		{
+			schema: {
+				params: VideoOrderParamsValidator,
+			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session as Session;
+			const { orderId, uploadId } = request.params;
+
+			const order = await prisma.customVideoOrder.findFirst({
+				where: { id: BigInt(orderId) },
+				include: { creator: true },
+			});
+			if (!order) {
+				return reply.sendError(APIErrors.CAMEO_ORDER_NOT_FOUND);
+			}
+			if (
+				order.creator.userId !== BigInt(session.userId) &&
+				order.fanId !== BigInt(session.userId)
+			) {
+				return reply.sendError(APIErrors.PERMISSION_ERROR);
+			}
+
+			const upload =
+				await prisma.customVideoOrderResponseUpload.findFirst({
+					where: {
+						orderId: BigInt(orderId),
+						uploadId: BigInt(uploadId),
+					},
+					include: { upload: true },
+				});
+			if (!upload) {
+				return reply.sendError(APIErrors.ITEM_NOT_FOUND("Upload"));
+			}
+
+			const result = await ModelConverter.toIMediaVideoUpload(
+				cloudflareStream,
+				mediaService,
+			)(upload.upload);
+
+			return reply.send(result);
+		},
+	);
+
+	fastify.get<{
+		Params: VideoOrderParams;
+		Reply: { results: IMediaVideoUpload[] };
+	}>(
+		"/:orderId/media-responses",
+		{
+			schema: {
+				params: VideoOrderParamsValidator,
+			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session as Session;
+			const { orderId } = request.params;
+
+			const order = await prisma.customVideoOrder.findFirst({
+				where: { id: BigInt(orderId) },
+				include: { creator: true },
+			});
+			if (!order) {
+				return reply.sendError(APIErrors.CAMEO_ORDER_NOT_FOUND);
+			}
+			if (
+				order.creator.userId !== BigInt(session.userId) &&
+				order.fanId !== BigInt(session.userId)
+			) {
+				return reply.sendError(APIErrors.PERMISSION_ERROR);
+			}
+
+			const uploads =
+				await prisma.customVideoOrderResponseUpload.findMany({
+					where: { orderId: BigInt(orderId) },
+					include: { upload: true },
+				});
+
+			const results = await Promise.all(
+				uploads.map((upload) =>
+					ModelConverter.toIMediaVideoUpload(
+						cloudflareStream,
+						mediaService,
+					)(upload.upload),
+				),
+			);
+
+			return reply.send({
+				results,
+			});
+		},
+	);
+
+	fastify.delete<{
+		Params: VideoOrderUploadParams;
+	}>(
+		"/:orderId/media-responses/:uploadId",
+		{
+			schema: {
+				params: VideoOrderUploadParamsValidator,
+			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+				sessionManager.requireProfileHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session as Session;
+			const { orderId, uploadId } = request.params;
+
+			const order = await prisma.customVideoOrder.findFirst({
+				where: { id: BigInt(orderId) },
+				include: { creator: true },
+			});
+			if (!order) {
+				return reply.sendError(APIErrors.CAMEO_ORDER_NOT_FOUND);
+			}
+			if (order.creator.userId !== BigInt(session.userId)) {
+				return reply.sendError(APIErrors.PERMISSION_ERROR);
+			}
+
+			await prisma.customVideoOrderResponseUpload.delete({
+				where: {
+					orderId_uploadId: {
+						orderId: order.id,
+						uploadId: BigInt(uploadId),
+					},
+				},
+			});
+
+			return reply.send({
+				uploadId,
+			});
+		},
+	);
+
+	fastify.post<{
+		Params: VideoOrderParams;
+		Body: CreateCustomVideoUploadBody;
+	}>(
+		"/:orderId/media-requests",
+		{
+			schema: {
+				params: VideoOrderParamsValidator,
+				body: CreateCustomVideoUploadBodyValidator,
+			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session as Session;
+			const { orderId } = request.params;
+			const { uploadId } = request.body;
+
+			const order = await prisma.customVideoOrder.findFirst({
+				where: { id: BigInt(orderId) },
+			});
+			if (!order) {
+				return reply.sendError(APIErrors.CAMEO_ORDER_NOT_FOUND);
+			}
+			if (order.fanId !== BigInt(session.userId)) {
+				return reply.sendError(APIErrors.PERMISSION_ERROR);
+			}
+
+			const upload = await prisma.upload.findFirst({
+				where: { id: BigInt(uploadId) },
+				select: { id: true, userId: true, usage: true, type: true },
+			});
+			if (!upload || upload.userId !== BigInt(session.userId)) {
+				return reply.sendError(APIErrors.PERMISSION_ERROR);
+			}
+			if (upload.usage !== UploadUsageType.CUSTOM_VIDEO_REQUEST) {
+				return reply.sendError(APIErrors.UPLOAD_INVALID_USAGE);
+			}
+			if (
+				upload.type !== UploadType.Video &&
+				upload.type !== UploadType.Image
+			) {
+				return reply.sendError(
+					APIErrors.UPLOAD_INVALID_TYPE(
+						"This method only accepts Image and Video uploads.",
+					),
+				);
+			}
+
+			await prisma.customVideoOrderRequestUpload.create({
+				data: { uploadId: upload.id, orderId: order.id },
+			});
+
+			return reply.send({
+				uploadId,
+			});
+		},
+	);
+
+	fastify.get<{
+		Params: VideoOrderUploadParams;
+		Reply: IMediaImageVideoUpload;
+	}>(
+		"/:orderId/media-requests/:uploadId",
+		{
+			schema: {
+				params: VideoOrderParamsValidator,
+			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session as Session;
+			const { orderId, uploadId } = request.params;
+
+			const order = await prisma.customVideoOrder.findFirst({
+				where: { id: BigInt(orderId) },
+				include: { creator: true },
+			});
+			if (!order) {
+				return reply.sendError(APIErrors.CAMEO_ORDER_NOT_FOUND);
+			}
+			if (
+				order.creator.userId !== BigInt(session.userId) &&
+				order.fanId !== BigInt(session.userId)
+			) {
+				return reply.sendError(APIErrors.PERMISSION_ERROR);
+			}
+
+			const upload = await prisma.customVideoOrderRequestUpload.findFirst(
+				{
+					where: {
+						orderId: BigInt(orderId),
+						uploadId: BigInt(uploadId),
+					},
+					include: { upload: true },
+				},
+			);
+			if (!upload) {
+				return reply.sendError(APIErrors.ITEM_NOT_FOUND("Upload"));
+			}
+
+			const response = await ModelConverter.toIMediaImageVideoUpload(
+				cloudflareStream,
+				mediaService,
+			)(upload.upload);
+
+			return reply.send(response);
+		},
+	);
+
+	fastify.get<{
+		Params: VideoOrderParams;
+		Reply: { results: IMediaImageVideoUpload[] };
+	}>(
+		"/:orderId/media-requests",
+		{
+			schema: {
+				params: VideoOrderParamsValidator,
+			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session as Session;
+			const { orderId } = request.params;
+
+			const order = await prisma.customVideoOrder.findFirst({
+				where: { id: BigInt(orderId) },
+				include: { creator: true },
+			});
+			if (!order) {
+				return reply.sendError(APIErrors.CAMEO_ORDER_NOT_FOUND);
+			}
+			if (
+				order.creator.userId !== BigInt(session.userId) &&
+				order.fanId !== BigInt(session.userId)
+			) {
+				return reply.sendError(APIErrors.PERMISSION_ERROR);
+			}
+
+			const uploads = await prisma.customVideoOrderRequestUpload.findMany(
+				{
+					where: { orderId: BigInt(orderId) },
+					include: { upload: true },
+				},
+			);
+
+			const results = await Promise.all(
+				uploads.map((upload) =>
+					ModelConverter.toIMediaImageVideoUpload(
+						cloudflareStream,
+						mediaService,
+					)(upload.upload),
+				),
+			);
+
+			return reply.send({
+				results,
+			});
+		},
+	);
+
+	fastify.delete<{
+		Params: VideoOrderUploadParams;
+	}>(
+		"/:orderId/media-requests/:uploadId",
+		{
+			schema: {
+				params: VideoOrderUploadParamsValidator,
+			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session as Session;
+			const { orderId, uploadId } = request.params;
+
+			const order = await prisma.customVideoOrder.findFirst({
+				where: { id: BigInt(orderId) },
+			});
+			if (!order) {
+				return reply.sendError(APIErrors.CAMEO_ORDER_NOT_FOUND);
+			}
+			if (order.fanId !== BigInt(session.userId)) {
+				return reply.sendError(APIErrors.PERMISSION_ERROR);
+			}
+
+			await prisma.customVideoOrderRequestUpload.delete({
+				where: {
+					orderId_uploadId: {
+						orderId: order.id,
+						uploadId: BigInt(uploadId),
+					},
+				},
+			});
+
+			return reply.send({
+				uploadId,
 			});
 		},
 	);

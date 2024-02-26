@@ -1,4 +1,4 @@
-import { PronounType } from "../../../CommonAPISchemas.js";
+import { IUpload, PronounType } from "../../../CommonAPISchemas.js";
 
 export interface CreateCustomVideoOrderBody {
 	creatorId: string;
@@ -24,11 +24,20 @@ export interface OrdersQuery {
 	sort?: string;
 }
 
-export interface UpdateCustomVideoUpload {
+export interface CreateCustomVideoUploadBody {
 	uploadId: string;
 }
 
 export interface CreateCustomVideoOrderReview {
 	score?: number;
 	review: string;
+}
+
+export interface VideoOrderParams {
+	orderId: string;
+}
+
+export interface VideoOrderUploadParams {
+	orderId: string;
+	uploadId: string;
 }
