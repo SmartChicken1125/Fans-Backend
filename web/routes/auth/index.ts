@@ -1,4 +1,5 @@
 import { FastifyPluginOptions, FastifyRequest } from "fastify";
+import crypto from "node:crypto";
 import pwdStrength from "pwd-strength";
 import APIErrors from "../../errors/index.js";
 import { isEmailValid, isUsernameValid } from "../../../common/Validation.js";
@@ -18,11 +19,12 @@ import SiftService from "../../../common/service/SiftService.js";
 import { generateUsername } from "../../../common/utils/UsernameGenerator.js";
 import {
 	RegisterEmailContent,
-	verifyCodeHTML,
+	resetPasswordEmailContent,
 } from "../../../constants/email-template/Templates.js";
 import { ModelConverter } from "../../models/modelConverter.js";
 import { FastifyTypebox } from "../../types.js";
 import {
+	AuthCheckResetPasswordReqBody,
 	AuthForgotPasswordReqBody,
 	AuthOAuth2AuthorizeReqBody,
 	AuthOAuth2AuthorizeReqParams,
@@ -34,11 +36,13 @@ import {
 	AuthPasswordRegisterReqBody,
 	AuthPasswordVerifyRegisterReqBody,
 	AuthResendReqBody,
+	AuthResetPasswordReqBody,
 	AuthUserInfoRespBody,
 	AuthVerifyCodeReqBody,
 	TokenRespBody,
 } from "./schemas.js";
 import {
+	AuthCheckResetPasswordReqBodyValidator,
 	AuthForgotPasswordReqBodyValidator,
 	AuthOAuth2AuthorizeReqBodyValidator,
 	AuthOAuth2AuthorizeReqParamsValidator,
@@ -51,10 +55,13 @@ import {
 	AuthResetPasswordReqBodyValidator,
 	AuthVerifyCodeReqBodyValidator,
 } from "./validation.js";
+import RedisService from "../../../common/service/RedisService.js";
 import { genOTP } from "../../../common/utils/OTPGenerator.js";
 import { User } from "@prisma/client";
 
 const DECIMAL_TO_CENT_FACTOR = 100;
+
+const SECONDS_IN_DAY = 24 * 60 * 60;
 
 export default async function routes(
 	fastify: FastifyTypebox,
@@ -68,6 +75,18 @@ export default async function routes(
 	const gemExchange = await container.resolve(GemExchangeService);
 	const emailService = await container.resolve(EmailerService);
 	const siftService = await container.resolve(SiftService);
+	const redis = await container.resolve(RedisService);
+
+	const resetPasswordCodeKey = (code: string) => `resetPasswordCodes:${code}`;
+
+	const validatePassword = (password: string) =>
+		pwdStrength(password, {
+			minNumberChars: 0,
+			minUpperChars: 0,
+			minLowerChars: 0,
+			minSpecialChars: 0,
+			minPasswordLength: 8,
+		});
 
 	const generateUsernameChecked = async () => {
 		for (let i = 0; i < 10000; i++) {
@@ -210,13 +229,7 @@ export default async function routes(
 				return reply.sendError(APIErrors.REGISTER_INVALID_EMAIL);
 			}
 
-			const strengthCheck = pwdStrength(password, {
-				minNumberChars: 0,
-				minUpperChars: 0,
-				minLowerChars: 0,
-				minSpecialChars: 0,
-				minPasswordLength: 8,
-			});
+			const strengthCheck = validatePassword(password);
 
 			if (!strengthCheck.success) {
 				return reply.sendError(
@@ -484,32 +497,112 @@ export default async function routes(
 				return reply.sendError(APIErrors.USER_BANNED);
 			}
 
-			// check already exist OTP for it
-			const otp = await prisma.oTPCode.findFirst({
-				where: { userId: user.id },
-			});
-			if (otp) {
-				// remove old otp
-				await prisma.oTPCode.delete({ where: { id: otp.id } });
+			if (!user.verifiedAt) {
+				siftLogin(user, request, "$failure", "$account_suspended");
+				return reply.sendError(APIErrors.USER_NOT_VERIFIED);
 			}
-			// create new otp for user
-			const otpCode = await prisma.oTPCode.create({
-				data: {
-					id: snowflake.gen(),
-					code: genOTP(6),
-					userId: user.id,
-				},
-			});
 
+			const code = crypto.randomBytes(128).toString("base64url");
+			await redis.set(
+				resetPasswordCodeKey(code),
+				email.toLowerCase(),
+				"EX",
+				SECONDS_IN_DAY,
+			);
 			// send email for OTP code
 			const emailData: SendEmailData = {
 				sender: process.env.SENDINBLUE_SENDER || "support@fyp.fans",
 				to: [user.email],
-				htmlContent: verifyCodeHTML(otpCode.code),
+				htmlContent: resetPasswordEmailContent(code),
 				subject: "Verify your account",
 			};
 			await emailService.sendEmail(emailData);
 			return reply.status(202).send();
+		},
+	);
+
+	fastify.post<{ Body: AuthCheckResetPasswordReqBody }>(
+		"/check-reset-password",
+		{
+			schema: {
+				body: AuthCheckResetPasswordReqBodyValidator,
+			},
+		},
+		async (request, reply) => {
+			const { code } = request.body;
+			const email = await redis.get(resetPasswordCodeKey(code));
+			if (!email) {
+				return reply.sendError(
+					APIErrors.PASSWORD_RESET_CODE_INVALID_OR_EXPIRED,
+				);
+			}
+
+			return reply.send();
+		},
+	);
+
+	fastify.post<{ Body: AuthResetPasswordReqBody; Reply: TokenRespBody }>(
+		"/reset-password",
+		{
+			schema: {
+				body: AuthResetPasswordReqBodyValidator,
+			},
+		},
+		async (request, reply) => {
+			const { code, password } = request.body;
+
+			const email = await redis.get(resetPasswordCodeKey(code));
+			if (!email) {
+				return reply.sendError(
+					APIErrors.PASSWORD_RESET_CODE_INVALID_OR_EXPIRED,
+				);
+			}
+			const user = await prisma.user.findFirst({
+				where: {
+					email: {
+						equals: email,
+						mode: "insensitive",
+					},
+				},
+			});
+
+			if (!user) {
+				return reply.sendError(APIErrors.USER_NOT_FOUND);
+			}
+
+			if (user.disabled) {
+				siftLogin(user, request, "$failure", "$account_suspended");
+				return reply.sendError(APIErrors.USER_BANNED);
+			}
+
+			if (!user.verifiedAt) {
+				siftLogin(user, request, "$failure", "$account_suspended");
+				return reply.sendError(APIErrors.USER_NOT_VERIFIED);
+			}
+
+			const strengthCheck = validatePassword(password);
+			if (!strengthCheck.success) {
+				return reply.sendError(
+					APIErrors.REGISTER_INVALID_PASSWORD(strengthCheck.message),
+				);
+			}
+
+			await redis.del(resetPasswordCodeKey(code));
+
+			const passwordHash = await generatePasswordHashSalt(password);
+			await prisma.user.update({
+				where: { id: user.id },
+				data: { password: passwordHash },
+			});
+
+			await sessionManager.destroySessionsForUser(user.id.toString());
+			const session = await sessionManager.createSessionForUser(
+				user.id.toString(),
+			);
+			const result: TokenRespBody = {
+				token: session.createToken(),
+			};
+			return reply.send(result);
 		},
 	);
 

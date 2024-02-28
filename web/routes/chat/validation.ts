@@ -7,7 +7,7 @@ import {
 	ChatAutomatedMessageWelcomeReqBody,
 	ChatConversationMessagesPostReqBody,
 	ChatConversationMessagesQuery,
-	ChatDeleteMessageIdParams,
+	ChatDeleteMessageId,
 	ChatFansListReqParams,
 	ChatIdParams,
 	ChatNoteReqBody,
@@ -40,16 +40,12 @@ export const ChatIdParamsValidator = Type.Object({
 
 assert<Equals<Static<typeof ChatIdParamsValidator>, ChatIdParams>>();
 
-export const ChatDeleteMessageIdParamsValidator = Type.Object({
-	id: Type.String({ format: "snowflake" }),
+export const ChatDeleteMessageIdValidator = Type.Object({
 	messageId: Type.String({ format: "snowflake" }),
 });
 
 assert<
-	Equals<
-		Static<typeof ChatDeleteMessageIdParamsValidator>,
-		ChatDeleteMessageIdParams
-	>
+	Equals<Static<typeof ChatDeleteMessageIdValidator>, ChatDeleteMessageId>
 >();
 
 export const ChatUserIdParamsValidator = Type.Object({

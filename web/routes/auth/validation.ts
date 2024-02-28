@@ -1,6 +1,7 @@
 import { Static, Type } from "@sinclair/typebox";
 import { Equals, assert } from "tsafe";
 import {
+	AuthCheckResetPasswordReqBody,
 	AuthForgotPasswordReqBody,
 	AuthOAuth2AuthorizeReqBody,
 	AuthOAuth2AuthorizeReqParams,
@@ -118,14 +119,25 @@ assert<
 >();
 
 export const AuthResetPasswordReqBodyValidator = Type.Object({
-	email: Type.String(),
 	password: Type.String(),
+	code: Type.String(),
 });
 
 assert<
 	Equals<
 		Static<typeof AuthResetPasswordReqBodyValidator>,
 		AuthResetPasswordReqBody
+	>
+>();
+
+export const AuthCheckResetPasswordReqBodyValidator = Type.Object({
+	code: Type.String(),
+});
+
+assert<
+	Equals<
+		Static<typeof AuthCheckResetPasswordReqBodyValidator>,
+		AuthCheckResetPasswordReqBody
 	>
 >();
 

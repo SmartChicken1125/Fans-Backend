@@ -27,8 +27,7 @@ export interface ChatIdParams {
 	id: string;
 }
 
-export interface ChatDeleteMessageIdParams {
-	id: string;
+export interface ChatDeleteMessageId {
 	messageId: string;
 }
 

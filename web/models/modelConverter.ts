@@ -402,6 +402,8 @@ export class ModelConverter {
 			isExclusive?: boolean;
 		},
 	): IPost {
+		const showPost =
+			metadata?.isSelf || !post.isPaidPost || metadata?.isPaidOut;
 		return {
 			id: post.id.toString(),
 			profileId: post.profileId.toString(),
@@ -413,17 +415,14 @@ export class ModelConverter {
 				? {
 						id: post.thumbMedia.id.toString(),
 						type: post.thumbMedia.type,
-						url: post.thumbMedia.url,
+						url: showPost ? post.thumbMedia.url : undefined,
 						blurhash: post.thumbMedia.blurhash ?? undefined,
 				  }
 				: undefined,
 			medias: post.postMedias.map((pm) => ({
 				id: pm.uploadId.toString(),
 				type: pm.upload.type,
-				url:
-					metadata?.isSelf || !post.isPaidPost || metadata?.isPaidOut
-						? pm.upload.url
-						: undefined,
+				url: showPost ? pm.upload.url : undefined,
 				blurhash: pm.upload.blurhash ?? undefined,
 				tags: pm.postMediaTags?.map((pmt) =>
 					ModelConverter.toIPostMediaTag(pmt),
@@ -492,34 +491,44 @@ export class ModelConverter {
 			isCommented?: boolean;
 			isLiked?: boolean;
 			isPaidOut?: boolean;
+			isSelf?: boolean;
 		},
 	): Promise<IPost> {
+		const showPost =
+			metadata?.isSelf || !post.isPaidPost || metadata?.isPaidOut;
 		const serializedPost = ModelConverter.toIPost(post, metadata);
+		const { url, thumbnail } =
+			post.thumbMedia && showPost
+				? await resolveAuthenticatedMediaURL(
+						post.thumbMedia,
+						cloudflareStream,
+						mediaUpload,
+				  ).then((r) => ({
+						url: r.url,
+						thumbnail: r.thumbnail ?? undefined,
+				  }))
+				: {
+						url: undefined,
+						thumbnail: undefined,
+				  };
 		const thumb: Media | undefined = post.thumbMedia
 			? {
 					id: post.thumbMedia.id.toString(),
 					type: post.thumbMedia.type,
-					...(await resolveAuthenticatedMediaURL(
-						post.thumbMedia,
-						cloudflareStream,
-						mediaUpload,
-					).then((r) => ({
-						url: r.url,
-						thumbnail: r.thumbnail ?? undefined,
-					}))),
+					url,
+					thumbnail: thumbnail ?? undefined,
 					blurhash: post.thumbMedia.blurhash ?? undefined,
 			  }
 			: undefined;
 		const medias: Media[] = await Promise.all(
 			post.postMedias.map(async (pm) => {
-				const { url, thumbnail } =
-					!post.isPaidPost || metadata?.isPaidOut
-						? await resolveAuthenticatedMediaURL(
-								pm.upload,
-								cloudflareStream,
-								mediaUpload,
-						  )
-						: { url: undefined, thumbnail: undefined };
+				const { url, thumbnail } = showPost
+					? await resolveAuthenticatedMediaURL(
+							pm.upload,
+							cloudflareStream,
+							mediaUpload,
+					  )
+					: { url: undefined, thumbnail: undefined };
 
 				return {
 					id: pm.uploadId.toString(),

@@ -1,4 +1,4 @@
-import { ErrorSource, errorCode } from "./index.js";
+import { errorCode, ErrorSource } from "./index.js";
 
 export const authAPIErrors = {
 	UNAUTHORIZED: {
@@ -142,6 +142,13 @@ export const authAPIErrors = {
 			code: errorCode(ErrorSource.Auth, 20),
 			message:
 				"This account has been banned due to violation of our terms of service.",
+		},
+	},
+	PASSWORD_RESET_CODE_INVALID_OR_EXPIRED: {
+		status: 403,
+		data: {
+			code: errorCode(ErrorSource.Auth, 21),
+			message: "The password reset code is invalid or has expired",
 		},
 	},
 };

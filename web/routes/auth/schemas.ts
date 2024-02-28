@@ -46,8 +46,12 @@ export interface AuthResendReqBody {
 }
 
 export interface AuthResetPasswordReqBody {
-	email: string;
+	code: string;
 	password: string;
+}
+
+export interface AuthCheckResetPasswordReqBody {
+	code: string;
 }
 
 export type AuthUserInfoRespBody = IUser & {

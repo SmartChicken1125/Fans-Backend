@@ -31,7 +31,7 @@ import {
 	ChatConversationMessagesQuery,
 	ChatConversationMessagesRespBody,
 	ChatConversationRespBody,
-	ChatDeleteMessageIdParams,
+	ChatDeleteMessageId,
 	ChatFansListReqParams,
 	ChatFansListRespBody,
 	ChatIdParams,
@@ -48,7 +48,7 @@ import {
 	ChatAutomatedMessageWelcomeReqBodyValidator,
 	ChatConversationMessagesPostReqBodyValidator,
 	ChatConversationMessagesQueryValidator,
-	ChatDeleteMessageIdParamsValidator,
+	ChatDeleteMessageIdValidator,
 	ChatFansListReqParamsValidator,
 	ChatIdParamsValidator,
 	ChatNoteReqBodyValidator,
@@ -532,12 +532,14 @@ export default async function routes(fastify: FastifyTypebox) {
 
 	// Deletes a message
 	fastify.delete<{
-		Params: ChatDeleteMessageIdParams;
+		Params: ChatIdParams;
+		Body: ChatDeleteMessageId;
 	}>(
-		"/conversations/:id/messages/:messageId",
+		"/conversations/:id/messages",
 		{
 			schema: {
-				params: ChatDeleteMessageIdParamsValidator,
+				params: ChatIdParamsValidator,
+				body: ChatDeleteMessageIdValidator,
 			},
 			preHandler: [
 				sessionManager.sessionPreHandler,
@@ -548,7 +550,7 @@ export default async function routes(fastify: FastifyTypebox) {
 			const session = request.session!;
 			const user = await session.getUser(prisma);
 			const channelId = BigInt(request.params.id);
-			const messageId = BigInt(request.params.messageId);
+			const messageId = BigInt(request.body.messageId);
 
 			const channel = await inboxManager.getChannelParticipants(
 				channelId,
