@@ -63,7 +63,7 @@ export const PostCreateReqBodyValidator = Type.Object({
 		Type.Object({
 			price: Type.Number(),
 			currency: Type.String(),
-			thumbId: Type.Optional(Type.String()),
+			thumbIds: Type.Optional(Type.Array(Type.String())),
 			tiers: Type.Optional(Type.Array(Type.String())),
 			roles: Type.Optional(Type.Array(Type.String())),
 			users: Type.Optional(Type.Array(Type.String())),
@@ -160,7 +160,7 @@ export const PostUpdateReqBodyValidator = Type.Object({
 		Type.Object({
 			price: Type.Number(),
 			currency: Type.String(),
-			thumbId: Type.Optional(Type.String()),
+			thumbIds: Type.Optional(Type.Array(Type.String())),
 			tiers: Type.Optional(Type.Array(Type.String())),
 			roles: Type.Optional(Type.Array(Type.String())),
 			users: Type.Optional(Type.Array(Type.String())),

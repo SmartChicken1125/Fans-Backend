@@ -470,7 +470,6 @@ export default async function routes(fastify: FastifyTypebox) {
 					stories: {
 						where: {
 							id: { notIn: hiddenStoryIds },
-							profile: { userId: BigInt(session.userId) },
 							updatedAt: { gt: oneDayBefore },
 						},
 						include: {
@@ -557,6 +556,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				storyComments,
 				storyLikes,
 				blockCount,
+				accessiblePaidPosts,
 			] = await Promise.all([
 				prisma.bookmark.findMany({
 					where: { userId: BigInt(session.userId) },
@@ -582,6 +582,57 @@ export default async function routes(fastify: FastifyTypebox) {
 					where: {
 						userId: BigInt(session.userId),
 						creatorId: profile.id,
+					},
+				}),
+				prisma.post.findMany({
+					where: {
+						paidPost: {
+							OR: [
+								{
+									rolePaidPosts: {
+										some: {
+											role: {
+												userLevels: {
+													some: {
+														userId: BigInt(
+															session.userId,
+														),
+													},
+												},
+											},
+										},
+									},
+								},
+								{
+									tierPaidPosts: {
+										some: {
+											tier: {
+												paymentSubscriptions: {
+													some: {
+														userId: BigInt(
+															session.userId,
+														),
+														status: SubscriptionStatus.Active,
+													},
+												},
+											},
+										},
+									},
+								},
+								{
+									userPaidPosts: {
+										some: {
+											user: {
+												id: BigInt(session.userId),
+											},
+										},
+									},
+								},
+							],
+						},
+					},
+					select: {
+						id: true,
 					},
 				}),
 			]);
@@ -639,7 +690,11 @@ export default async function routes(fastify: FastifyTypebox) {
 								.map((p) => p.postId)
 								.includes(p.postId),
 							isPaidOut: p.post.paidPost
-								? p.post.paidPost.PaidPostTransaction.length > 0
+								? p.post.paidPost.PaidPostTransaction.length >
+										0 ||
+								  accessiblePaidPosts
+										.map((p) => p.id)
+										.includes(p.post.id)
 								: false,
 							isSelf: p.post.profileId === selfProfile?.id,
 							isExclusive:
@@ -861,9 +916,8 @@ export default async function routes(fastify: FastifyTypebox) {
 			}
 
 			if (session) {
-				const requestingUser =
-					(await session.getUserWithProfile(prisma))!;
-				const isSelf = requestingUser.profile?.id === profile.id;
+				const selfProfile = await session.getProfile(prisma);
+				const isSelf = selfProfile?.id === profile.id;
 
 				const paidPostTransactions =
 					await prisma.paidPostTransaction.findMany({
@@ -919,7 +973,7 @@ export default async function routes(fastify: FastifyTypebox) {
 														userLevels: {
 															some: {
 																userId: BigInt(
-																	requestingUser.id,
+																	session.userId,
 																),
 															},
 														},
@@ -934,7 +988,7 @@ export default async function routes(fastify: FastifyTypebox) {
 														paymentSubscriptions: {
 															some: {
 																userId: BigInt(
-																	requestingUser.id,
+																	session.userId,
 																),
 																status: SubscriptionStatus.Active,
 															},
@@ -948,7 +1002,7 @@ export default async function routes(fastify: FastifyTypebox) {
 												some: {
 													user: {
 														id: BigInt(
-															requestingUser.id,
+															session.userId,
 														),
 													},
 												},
@@ -959,45 +1013,101 @@ export default async function routes(fastify: FastifyTypebox) {
 						  ],
 				};
 
-				const [videoCount, imageCount, subscriptionCount, review] =
-					await Promise.all([
-						prisma.upload.count({
-							where: {
-								usage: UploadUsageType.POST,
-								type: UploadType.Video,
-								postMedias: {
-									some: {
-										post: postCondition,
-									},
+				const [
+					videoCount,
+					imageCount,
+					subscriptionCount,
+					review,
+					accessiblePaidPosts,
+				] = await Promise.all([
+					prisma.upload.count({
+						where: {
+							usage: UploadUsageType.POST,
+							type: UploadType.Video,
+							postMedias: {
+								some: {
+									post: postCondition,
 								},
 							},
-						}),
-						prisma.upload.count({
-							where: {
-								usage: UploadUsageType.POST,
-								type: UploadType.Image,
-								postMedias: {
-									some: {
-										post: postCondition,
-									},
+						},
+					}),
+					prisma.upload.count({
+						where: {
+							usage: UploadUsageType.POST,
+							type: UploadType.Image,
+							postMedias: {
+								some: {
+									post: postCondition,
 								},
 							},
-						}),
-						prisma.paymentSubscription.count({
-							where: {
-								creatorId: profile?.id,
+						},
+					}),
+					prisma.paymentSubscription.count({
+						where: {
+							creatorId: profile?.id,
+							OR: [
+								{ status: SubscriptionStatus.Active },
+								{ endDate: { gte: new Date() } },
+							],
+						},
+					}),
+					prisma.review.aggregate({
+						_avg: { score: true },
+						_count: { score: true },
+						where: { creatorId: profile.id },
+					}),
+					prisma.post.findMany({
+						where: {
+							paidPost: {
 								OR: [
-									{ status: SubscriptionStatus.Active },
-									{ endDate: { gte: new Date() } },
+									{
+										rolePaidPosts: {
+											some: {
+												role: {
+													userLevels: {
+														some: {
+															userId: BigInt(
+																session.userId,
+															),
+														},
+													},
+												},
+											},
+										},
+									},
+									{
+										tierPaidPosts: {
+											some: {
+												tier: {
+													paymentSubscriptions: {
+														some: {
+															userId: BigInt(
+																session.userId,
+															),
+															status: SubscriptionStatus.Active,
+														},
+													},
+												},
+											},
+										},
+									},
+									{
+										userPaidPosts: {
+											some: {
+												user: {
+													id: BigInt(session.userId),
+												},
+											},
+										},
+									},
 								],
 							},
-						}),
-						prisma.review.aggregate({
-							_avg: { score: true },
-							_count: { score: true },
-							where: { creatorId: profile.id },
-						}),
-					]);
+						},
+						select: {
+							id: true,
+						},
+					}),
+				]);
 
 				const isBlocked = session
 					? (await prisma.blockedUser.count({
@@ -1072,9 +1182,13 @@ export default async function routes(fastify: FastifyTypebox) {
 								isLiked: postLikes
 									.map((p) => p.postId)
 									.includes(p.postId),
-								isPaidOut: paidPostTransactions
-									.map((ppt) => ppt.paidPost.postId)
-									.includes(p.postId),
+								isPaidOut:
+									paidPostTransactions
+										.map((ppt) => ppt.paidPost.postId)
+										.includes(p.postId) ||
+									accessiblePaidPosts
+										.map((p) => p.id)
+										.includes(p.postId),
 								isSelf,
 								isExclusive:
 									p.post.roles.length > 0 ||

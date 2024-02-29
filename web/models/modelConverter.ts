@@ -70,6 +70,7 @@ import {
 	PostMediaTag,
 	TransactionStatus,
 	VideoCall,
+	PaidPostThumb,
 } from "@prisma/client";
 import {
 	IApplication,
@@ -657,7 +658,7 @@ export class ModelConverter {
 
 	static toIPaidPost(
 		paidPost: PaidPost & {
-			thumbMedia: Upload | null;
+			thumbs: (PaidPostThumb & { upload: Upload })[] | null;
 		},
 	): IPaidPost {
 		return {
@@ -665,14 +666,15 @@ export class ModelConverter {
 			postId: paidPost.postId.toString(),
 			price: paidPost.price,
 			currency: paidPost.currency,
-			thumb: paidPost.thumbMedia
-				? {
-						id: paidPost.thumbMedia.id.toString(),
-						type: paidPost.thumbMedia.type,
-						url: paidPost.thumbMedia.url,
-						blurhash: paidPost.thumbMedia.blurhash ?? undefined,
-				  }
-				: undefined,
+			thumbs:
+				paidPost.thumbs && paidPost.thumbs.length > 0
+					? paidPost.thumbs.map((t) => ({
+							id: t.upload.id.toString(),
+							type: t.upload.type,
+							url: t.upload.url,
+							blurhash: t.upload.blurhash ?? undefined,
+					  }))
+					: undefined,
 			isPinned: paidPost.isPinned,
 			isHidden: paidPost.isHidden,
 			updatedAt: paidPost.updatedAt.toISOString(),
@@ -1574,6 +1576,8 @@ export class ModelConverter {
 			text: data.text ?? "",
 			score: data.score,
 			createdAt: data.createdAt.toISOString(),
+			// TODO: integrate payment into review tip
+			tip: 0,
 		};
 	}
 

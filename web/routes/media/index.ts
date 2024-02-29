@@ -471,7 +471,7 @@ export default async function routes(fastify: FastifyTypebox) {
 					});
 				}
 
-				const [medias] = await Promise.all([
+				const [medias, accessiblePaidPosts] = await Promise.all([
 					prisma.upload.findMany({
 						where: {
 							type: type ?? {
@@ -495,6 +495,57 @@ export default async function routes(fastify: FastifyTypebox) {
 						take: size,
 						skip: (page - 1) * size,
 					}),
+					prisma.post.findMany({
+						where: {
+							paidPost: {
+								OR: [
+									{
+										rolePaidPosts: {
+											some: {
+												role: {
+													userLevels: {
+														some: {
+															userId: BigInt(
+																session.userId,
+															),
+														},
+													},
+												},
+											},
+										},
+									},
+									{
+										tierPaidPosts: {
+											some: {
+												tier: {
+													paymentSubscriptions: {
+														some: {
+															userId: BigInt(
+																session.userId,
+															),
+															status: SubscriptionStatus.Active,
+														},
+													},
+												},
+											},
+										},
+									},
+									{
+										userPaidPosts: {
+											some: {
+												user: {
+													id: BigInt(session.userId),
+												},
+											},
+										},
+									},
+								],
+							},
+						},
+						select: {
+							id: true,
+						},
+					}),
 				]);
 
 				const result: MediasRespBody = {
@@ -511,8 +562,12 @@ export default async function routes(fastify: FastifyTypebox) {
 								isPaidPost: m.postMedias.some(
 									(pm) => pm.post.isPaidPost,
 								),
-								isPaidOut: m.postMedias.some((pm) =>
-									paidOutPostIds.includes(pm.postId),
+								isPaidOut: m.postMedias.some(
+									(pm) =>
+										paidOutPostIds.includes(pm.postId) ||
+										accessiblePaidPosts
+											.map((p) => p.id)
+											.includes(pm.postId),
 								),
 							});
 							media.url = url;

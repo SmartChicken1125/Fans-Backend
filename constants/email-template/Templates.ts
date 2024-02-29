@@ -1,4 +1,4 @@
-export const verifyCodeHTML = (code: string) =>
+export const resetPasswordEmailContent = (code: string) =>
 	`
   <div style="font-family: Helvetica,Arial,sans-serif;min-width:1000px;overflow:auto;line-height:2">
     <div style="margin:50px auto;width:70%;padding:20px 0">
@@ -7,7 +7,8 @@ export const verifyCodeHTML = (code: string) =>
       </div>
       <p style="font-size:1.1em">Hello!</p>
       <p>You are receiving this email because we received a password reset request for your account.</p>
-      <p>Here is your verification code: <span style="font-size:1.1em;color:#00466a;">${code}</span></p>
+      <p><a href="${process.env.PUBLIC_URL}/reset-password?code=${code}">Reset password</a></p>
+	  <p>This link will expire in 24 hours after this email was sent.</p>
       <p>Regards, <br />FYP.Fans Team</p>
       <div style="border-top:1px solid #eee">
         <p style="color:#444;font-size:0.8em;">If you didn't request password request, then please contact our support team: <a href="mailto:support@fyp.fans">support@fyp.fans</a> <br />This code will be expired in 5 minutes!</p>

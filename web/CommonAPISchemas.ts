@@ -480,7 +480,7 @@ export interface IPaidPost {
 	postId: string;
 	price: number;
 	currency: string;
-	thumb?: Media;
+	thumbs?: Media[];
 	isPinned: boolean;
 	isHidden: boolean;
 	updatedAt: string;
@@ -1138,6 +1138,7 @@ export interface IReview {
 	text?: string;
 	score: number;
 	createdAt: string;
+	tip?: number;
 }
 
 export interface IPostMediaTag {
@@ -1165,4 +1166,9 @@ export interface IMediaVideoUpload {
 		url: string;
 		thumbnail?: string;
 	};
+}
+
+export interface ISession {
+	id: string;
+	userId: string;
 }

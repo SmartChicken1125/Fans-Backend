@@ -139,7 +139,9 @@ export default async function routes(fastify: FastifyTypebox) {
 				include: {
 					profile: true,
 					paidPost: {
-						include: { thumbMedia: true },
+						include: {
+							thumbs: { include: { upload: true } },
+						},
 					},
 					thumbMedia: true,
 					postMedias: {
@@ -245,7 +247,9 @@ export default async function routes(fastify: FastifyTypebox) {
 				include: {
 					profile: true,
 					paidPost: {
-						include: { thumbMedia: true },
+						include: {
+							thumbs: { include: { upload: true } },
+						},
 					},
 					thumbMedia: true,
 					postMedias: {
@@ -310,104 +314,157 @@ export default async function routes(fastify: FastifyTypebox) {
 				currentDate.getTime() - 24 * 60 * 60 * 1000,
 			);
 
-			const row = await prisma.post.findFirst({
-				where: { id: BigInt(id) },
-				include: {
-					roles: {
-						include: { role: true },
-					},
-					tiers: true,
-					users: true,
-					paidPost: {
-						include: {
-							thumbMedia: true,
-							PaidPostTransaction: {
-								where: {
-									userId: BigInt(session.userId),
-									status: TransactionStatus.Successful,
-								},
-							},
+			const [row, accessiblePaidPosts] = await Promise.all([
+				prisma.post.findFirst({
+					where: { id: BigInt(id) },
+					include: {
+						roles: {
+							include: { role: true },
 						},
-					},
-					categories: {
-						include: { category: true },
-						orderBy: { category: { order: "asc" } },
-					},
-					fundraiser: {
-						include: { thumbMedia: true },
-					},
-					giveaway: {
-						include: {
-							thumbMedia: true,
-							roles: {
-								include: { role: true },
-							},
-						},
-					},
-					poll: {
-						include: {
-							thumbMedia: true,
-							roles: { include: { role: true } },
-							pollAnswers: {
-								include: {
-									pollVotes: true,
-									_count: {
-										select: { pollVotes: true },
-									},
-								},
-							},
-						},
-					},
-					comments: {
-						include: { user: true },
-					},
-					schedule: true,
-					taggedPeoples: {
-						include: { user: true },
-					},
-					thumbMedia: true,
-					postMedias: {
-						include: {
-							upload: true,
-							postMediaTags: {
-								include: {
-									user: true,
-								},
-							},
-						},
-					},
-					profile: {
-						include: {
-							stories: {
-								where: {
-									id: { notIn: hiddenStoryIds },
-									profile: {
+						tiers: true,
+						users: true,
+						paidPost: {
+							include: {
+								thumbs: { include: { upload: true } },
+								PaidPostTransaction: {
+									where: {
 										userId: BigInt(session.userId),
+										status: TransactionStatus.Successful,
 									},
-									updatedAt: { gt: oneDayBefore },
 								},
-								include: {
-									upload: true,
-									_count: {
-										select: {
-											storyComments: true,
-											storyLikes: true,
+							},
+						},
+						categories: {
+							include: { category: true },
+							orderBy: { category: { order: "asc" } },
+						},
+						fundraiser: {
+							include: { thumbMedia: true },
+						},
+						giveaway: {
+							include: {
+								thumbMedia: true,
+								roles: {
+									include: { role: true },
+								},
+							},
+						},
+						poll: {
+							include: {
+								thumbMedia: true,
+								roles: { include: { role: true } },
+								pollAnswers: {
+									include: {
+										pollVotes: true,
+										_count: {
+											select: { pollVotes: true },
 										},
 									},
 								},
-								orderBy: { updatedAt: "asc" },
+							},
+						},
+						comments: {
+							include: { user: true },
+						},
+						schedule: true,
+						taggedPeoples: {
+							include: { user: true },
+						},
+						thumbMedia: true,
+						postMedias: {
+							include: {
+								upload: true,
+								postMediaTags: {
+									include: {
+										user: true,
+									},
+								},
+							},
+						},
+						profile: {
+							include: {
+								stories: {
+									where: {
+										id: { notIn: hiddenStoryIds },
+										profile: {
+											userId: BigInt(session.userId),
+										},
+										updatedAt: { gt: oneDayBefore },
+									},
+									include: {
+										upload: true,
+										_count: {
+											select: {
+												storyComments: true,
+												storyLikes: true,
+											},
+										},
+									},
+									orderBy: { updatedAt: "asc" },
+								},
+							},
+						},
+						_count: {
+							select: {
+								bookmarks: true,
+								postLikes: true,
+								comments: true,
 							},
 						},
 					},
-					_count: {
-						select: {
-							bookmarks: true,
-							postLikes: true,
-							comments: true,
+				}),
+				prisma.post.findMany({
+					where: {
+						paidPost: {
+							OR: [
+								{
+									rolePaidPosts: {
+										some: {
+											role: {
+												userLevels: {
+													some: {
+														userId: BigInt(
+															session.userId,
+														),
+													},
+												},
+											},
+										},
+									},
+								},
+								{
+									tierPaidPosts: {
+										some: {
+											tier: {
+												paymentSubscriptions: {
+													some: {
+														userId: BigInt(
+															session.userId,
+														),
+														status: SubscriptionStatus.Active,
+													},
+												},
+											},
+										},
+									},
+								},
+								{
+									userPaidPosts: {
+										some: {
+											user: {
+												id: BigInt(session.userId),
+											},
+										},
+									},
+								},
+							],
 						},
 					},
-				},
-			});
+					select: {
+						id: true,
+					},
+				}),
+			]);
 			if (!row) {
 				return reply.sendError(APIErrors.ITEM_NOT_FOUND("Post"));
 			}
@@ -439,7 +496,8 @@ export default async function routes(fastify: FastifyTypebox) {
 							where: { userId: BigInt(session.userId) },
 						})) > 0,
 					isPaidOut: row.paidPost
-						? row.paidPost.PaidPostTransaction.length > 0
+						? row.paidPost.PaidPostTransaction.length > 0 ||
+						  accessiblePaidPosts.map((p) => p.id).includes(row.id)
 						: false,
 					isSelf: row.profileId === profile?.id,
 					isExclusive:
@@ -518,49 +576,6 @@ export default async function routes(fastify: FastifyTypebox) {
 					new Date().getTime()
 			) {
 				isPosted = false;
-			}
-
-			if (data.paidPost) {
-				const uploads = await prisma.upload.findMany({
-					where: {
-						usage: UploadUsageType.POST,
-						userId: BigInt(session.userId),
-						OR: [
-							{
-								id: {
-									in: data.postMedias?.map((item) =>
-										BigInt(item.postMediaId),
-									),
-								},
-							},
-							{
-								id: data.thumbId
-									? BigInt(data.thumbId)
-									: undefined,
-							},
-							{
-								id: data.paidPost.thumbId
-									? BigInt(data.paidPost.thumbId)
-									: undefined,
-							},
-							{
-								id: data.fundraiser?.thumbId
-									? BigInt(data.fundraiser?.thumbId)
-									: undefined,
-							},
-							{
-								id: data.giveaway?.thumbId
-									? BigInt(data.giveaway?.thumbId)
-									: undefined,
-							},
-							{
-								id: data.poll?.thumbId
-									? BigInt(data.poll?.thumbId)
-									: undefined,
-							},
-						],
-					},
-				});
 			}
 
 			// data.mediaIds
@@ -746,9 +761,6 @@ export default async function routes(fastify: FastifyTypebox) {
 									id: snowflake.gen(),
 									currency: data.paidPost.currency,
 									price: data.paidPost.price,
-									thumbId: data.paidPost.thumbId
-										? BigInt(data.paidPost.thumbId)
-										: undefined,
 								},
 						  }
 						: undefined,
@@ -832,7 +844,9 @@ export default async function routes(fastify: FastifyTypebox) {
 						},
 					},
 					paidPost: {
-						include: { thumbMedia: true },
+						include: {
+							thumbs: { include: { upload: true } },
+						},
 					},
 					schedule: true,
 					roles: { include: { role: true } },
@@ -918,43 +932,44 @@ export default async function routes(fastify: FastifyTypebox) {
 			}
 
 			if (created.paidPost && data.paidPost) {
+				if (
+					data.paidPost.thumbIds &&
+					data.paidPost.thumbIds.length > 0
+				) {
+					await prisma.paidPostThumb.createMany({
+						data: data.paidPost.thumbIds.map((thumbId) => ({
+							id: snowflake.gen(),
+							paidPostId: created.paidPost!.id,
+							uploadId: BigInt(thumbId),
+						})),
+					});
+				}
+
 				if (data.paidPost.tiers && data.paidPost.tiers.length > 0) {
-					await prisma.tierPost.createMany({
-						data: data.paidPost.tiers
-							.filter((t) =>
-								data.tiers ? data.tiers.indexOf(t) < 0 : true,
-							)
-							.map((t) => ({
-								id: snowflake.gen(),
-								tierId: BigInt(t),
-								postId: created.id,
-							})),
+					await prisma.tierPaidPost.createMany({
+						data: data.paidPost.tiers.map((t) => ({
+							id: snowflake.gen(),
+							tierId: BigInt(t),
+							paidPostId: created.paidPost!.id,
+						})),
 					});
 				}
 				if (data.paidPost.users && data.paidPost.users.length > 0) {
-					await prisma.userPost.createMany({
-						data: data.paidPost.users
-							.filter((u) =>
-								data.users ? data.users.indexOf(u) < 0 : true,
-							)
-							.map((u) => ({
-								id: snowflake.gen(),
-								userId: BigInt(u),
-								postId: created.id,
-							})),
+					await prisma.userPaidPost.createMany({
+						data: data.paidPost.users.map((u) => ({
+							id: snowflake.gen(),
+							userId: BigInt(u),
+							paidPostId: created.paidPost!.id,
+						})),
 					});
 				}
 				if (data.paidPost.roles && data.paidPost.roles.length > 0) {
-					await prisma.rolePost.createMany({
-						data: data.paidPost.roles
-							.filter((r) =>
-								data.roles ? data.roles.indexOf(r) < 0 : true,
-							)
-							.map((r) => ({
-								id: snowflake.gen(),
-								roleId: BigInt(r),
-								postId: created.id,
-							})),
+					await prisma.rolePaidPost.createMany({
+						data: data.paidPost.roles.map((r) => ({
+							id: snowflake.gen(),
+							roleId: BigInt(r),
+							paidPostId: created.paidPost!.id,
+						})),
 					});
 				}
 			}
@@ -1002,10 +1017,13 @@ export default async function routes(fastify: FastifyTypebox) {
 						},
 					},
 					paidPost: {
-						include: { thumbMedia: true },
+						include: {
+							thumbs: { include: { upload: true } },
+						},
 					},
 					schedule: true,
 					roles: { include: { role: true } },
+					users: { include: { user: true } },
 					taggedPeoples: { include: { user: true } },
 					profile: true,
 					thumbMedia: true,
@@ -1048,6 +1066,9 @@ export default async function routes(fastify: FastifyTypebox) {
 
 			const result: PostRespBody = {
 				...ModelConverter.toIPost(updatedPost),
+				users: updatedPost.users.map((u) =>
+					ModelConverter.toIUser(u.user),
+				),
 				roles: updatedPost.roles.map((r) =>
 					ModelConverter.toIRole(r.role),
 				),
@@ -1408,7 +1429,9 @@ export default async function routes(fastify: FastifyTypebox) {
 				include: {
 					profile: true,
 					paidPost: {
-						include: { thumbMedia: true },
+						include: {
+							thumbs: { include: { upload: true } },
+						},
 					},
 					thumbMedia: true,
 					postMedias: {
@@ -1632,7 +1655,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				currentDate.getTime() - 24 * 60 * 60 * 1000,
 			);
 
-			const [rows, metadata] = await Promise.all([
+			const [rows, metadata, accessiblePaidPosts] = await Promise.all([
 				prisma.post.findMany({
 					where: whereCondition,
 					include: {
@@ -1648,7 +1671,9 @@ export default async function routes(fastify: FastifyTypebox) {
 							},
 						},
 						paidPost: {
-							include: { thumbMedia: true },
+							include: {
+								thumbs: { include: { upload: true } },
+							},
 						},
 						fundraiser: {
 							include: { thumbMedia: true },
@@ -1792,6 +1817,57 @@ export default async function routes(fastify: FastifyTypebox) {
 					take: size,
 					skip: (page - 1) * size,
 				}),
+				prisma.post.findMany({
+					where: {
+						paidPost: {
+							OR: [
+								{
+									rolePaidPosts: {
+										some: {
+											role: {
+												userLevels: {
+													some: {
+														userId: BigInt(
+															session.userId,
+														),
+													},
+												},
+											},
+										},
+									},
+								},
+								{
+									tierPaidPosts: {
+										some: {
+											tier: {
+												paymentSubscriptions: {
+													some: {
+														userId: BigInt(
+															session.userId,
+														),
+														status: SubscriptionStatus.Active,
+													},
+												},
+											},
+										},
+									},
+								},
+								{
+									userPaidPosts: {
+										some: {
+											user: {
+												id: BigInt(session.userId),
+											},
+										},
+									},
+								},
+							],
+						},
+					},
+					select: {
+						id: true,
+					},
+				}),
 			]);
 
 			await Promise.all(
@@ -1820,7 +1896,10 @@ export default async function routes(fastify: FastifyTypebox) {
 							metadata.find((m) => m.id === row.id)!.paidPost
 								? metadata.find((m) => m.id === row.id)!
 										.paidPost!.PaidPostTransaction.length >
-								  0
+										0 ||
+								  accessiblePaidPosts
+										.map((p) => p.id)
+										.includes(row.id)
 								: false,
 						isSelf: row.profileId === profile?.id,
 						isExclusive:
@@ -1905,13 +1984,6 @@ export default async function routes(fastify: FastifyTypebox) {
 
 			const session = request.session;
 			if (session) {
-				const userLevel = await prisma.userLevel.findFirst({
-					where: {
-						creatorId: BigInt(user.profile.id),
-						userId: BigInt(session.userId),
-					},
-				});
-
 				const hiddenPosts = await prisma.hiddenPost.findMany({
 					select: { postId: true },
 					where: { userId: BigInt(session.userId) },
@@ -1926,15 +1998,9 @@ export default async function routes(fastify: FastifyTypebox) {
 								{
 									AND: [
 										{
-											roles: {
-												none: {},
-											},
-											tiers: {
-												none: {},
-											},
-											users: {
-												none: {},
-											},
+											roles: { none: {} },
+											tiers: { none: {} },
+											users: { none: {} },
 										},
 									],
 								},
@@ -2046,185 +2112,250 @@ export default async function routes(fastify: FastifyTypebox) {
 					currentDate.getTime() - 24 * 60 * 60 * 1000,
 				);
 
-				const [rows, metadata] = await Promise.all([
-					prisma.post.findMany({
-						where: whereCondition,
-						include: {
-							thumbMedia: true,
-							postMedias: {
-								include: {
-									upload: true,
-									postMediaTags: {
-										include: {
-											user: true,
+				const [rows, metadata, accessiblePaidPosts] = await Promise.all(
+					[
+						prisma.post.findMany({
+							where: whereCondition,
+							include: {
+								thumbMedia: true,
+								postMedias: {
+									include: {
+										upload: true,
+										postMediaTags: {
+											include: {
+												user: true,
+											},
 										},
 									},
 								},
-							},
-							profile: {
-								include: {
-									stories: {
-										where: {
-											id: { notIn: hiddenStoryIds },
-											profile: {
-												userId: BigInt(session.userId),
+								profile: {
+									include: {
+										stories: {
+											where: {
+												id: { notIn: hiddenStoryIds },
+												profile: {
+													userId: BigInt(
+														session.userId,
+													),
+												},
+												updatedAt: { gt: oneDayBefore },
 											},
-											updatedAt: { gt: oneDayBefore },
+											include: {
+												upload: true,
+												_count: {
+													select: {
+														storyComments: true,
+														storyLikes: true,
+													},
+												},
+											},
+											orderBy: { updatedAt: "asc" },
 										},
-										include: {
-											upload: true,
-											_count: {
-												select: {
-													storyComments: true,
-													storyLikes: true,
+									},
+								},
+								paidPost: {
+									include: {
+										thumbs: { include: { upload: true } },
+									},
+								},
+								categories: {
+									include: { category: true },
+									orderBy: { category: { order: "asc" } },
+								},
+								taggedPeoples: {
+									include: { user: true },
+								},
+								fundraiser: {
+									include: { thumbMedia: true },
+								},
+								giveaway: {
+									include: {
+										thumbMedia: true,
+										roles: { include: { role: true } },
+									},
+								},
+								poll: {
+									include: {
+										thumbMedia: true,
+										roles: { include: { role: true } },
+										pollAnswers: {
+											include: {
+												pollVotes: true,
+												_count: {
+													select: { pollVotes: true },
 												},
 											},
 										},
-										orderBy: { updatedAt: "asc" },
+									},
+								},
+								roles: {
+									include: { role: true },
+								},
+								tiers: {
+									include: { tier: true },
+								},
+								users: {
+									include: { user: true },
+								},
+								schedule: true,
+								_count: {
+									select: {
+										bookmarks: true,
+										postLikes: true,
+										comments: true,
 									},
 								},
 							},
-							paidPost: {
-								include: { thumbMedia: true },
-							},
-							categories: {
-								include: { category: true },
-								orderBy: { category: { order: "asc" } },
-							},
-							taggedPeoples: {
-								include: { user: true },
-							},
-							fundraiser: {
-								include: { thumbMedia: true },
-							},
-							giveaway: {
-								include: {
-									thumbMedia: true,
-									roles: { include: { role: true } },
+							orderBy:
+								sort === "Latest"
+									? [
+											{ isPosted: "asc" },
+											{ isPinned: "desc" },
+											{ id: "desc" },
+									  ]
+									: sort === "Popular"
+									? [
+											{ isPosted: "asc" },
+											{ isPinned: "desc" },
+											{ comments: { _count: "desc" } },
+											{ postLikes: { _count: "desc" } },
+									  ]
+									: [
+											{ isPosted: "asc" },
+											{ isPinned: "desc" },
+									  ],
+							take: size,
+							skip: (page - 1) * size,
+						}),
+						prisma.post.findMany({
+							where: whereCondition,
+							include: {
+								_count: {
+									select: {
+										bookmarks: {
+											where: {
+												userId: BigInt(session.userId),
+											},
+										},
+										postLikes: {
+											where: {
+												userId: BigInt(session.userId),
+											},
+										},
+										comments: {
+											where: {
+												userId: BigInt(session.userId),
+											},
+										},
+									},
 								},
-							},
-							poll: {
-								include: {
-									thumbMedia: true,
-									roles: { include: { role: true } },
-									pollAnswers: {
-										include: {
-											pollVotes: true,
-											_count: {
-												select: { pollVotes: true },
+								paidPost: {
+									include: {
+										thumbs: { include: { upload: true } },
+										PaidPostTransaction: {
+											where: {
+												userId: BigInt(session.userId),
+												status: TransactionStatus.Successful,
+											},
+										},
+									},
+								},
+								thumbMedia: true,
+								postMedias: {
+									include: {
+										upload: true,
+										postMediaTags: {
+											include: {
+												user: true,
 											},
 										},
 									},
 								},
 							},
-							roles: {
-								include: { role: true },
-							},
-							tiers: {
-								include: { tier: true },
-							},
-							users: {
-								include: { user: true },
-							},
-							schedule: true,
-							_count: {
-								select: {
-									bookmarks: true,
-									postLikes: true,
-									comments: true,
+							orderBy:
+								sort === "Latest"
+									? [
+											{ isPosted: "asc" },
+											{ isPinned: "desc" },
+											{ id: "desc" },
+									  ]
+									: sort === "Popular"
+									? [
+											{ isPosted: "asc" },
+											{ isPinned: "desc" },
+											{ comments: { _count: "desc" } },
+											{ postLikes: { _count: "desc" } },
+									  ]
+									: [
+											{ isPosted: "asc" },
+											{ isPinned: "desc" },
+									  ],
+							take: size,
+							skip: (page - 1) * size,
+						}),
+						prisma.post.findMany({
+							where: {
+								paidPost: {
+									OR: [
+										{
+											rolePaidPosts: {
+												some: {
+													role: {
+														userLevels: {
+															some: {
+																userId: BigInt(
+																	session.userId,
+																),
+															},
+														},
+													},
+												},
+											},
+										},
+										{
+											tierPaidPosts: {
+												some: {
+													tier: {
+														paymentSubscriptions: {
+															some: {
+																userId: BigInt(
+																	session.userId,
+																),
+																status: SubscriptionStatus.Active,
+															},
+														},
+													},
+												},
+											},
+										},
+										{
+											userPaidPosts: {
+												some: {
+													user: {
+														id: BigInt(
+															session.userId,
+														),
+													},
+												},
+											},
+										},
+									],
 								},
 							},
-						},
-						orderBy:
-							sort === "Latest"
-								? [
-										{ isPosted: "asc" },
-										{ isPinned: "desc" },
-										{ id: "desc" },
-								  ]
-								: sort === "Popular"
-								? [
-										{ isPosted: "asc" },
-										{ isPinned: "desc" },
-										{ comments: { _count: "desc" } },
-										{ postLikes: { _count: "desc" } },
-								  ]
-								: [{ isPosted: "asc" }, { isPinned: "desc" }],
-						take: size,
-						skip: (page - 1) * size,
-					}),
-					prisma.post.findMany({
-						where: whereCondition,
-						include: {
-							_count: {
-								select: {
-									bookmarks: {
-										where: {
-											userId: BigInt(session.userId),
-										},
-									},
-									postLikes: {
-										where: {
-											userId: BigInt(session.userId),
-										},
-									},
-									comments: {
-										where: {
-											userId: BigInt(session.userId),
-										},
-									},
-								},
+							select: {
+								id: true,
 							},
-							paidPost: {
-								where: {
-									PaidPostTransaction: {
-										some: {
-											userId: BigInt(session.userId),
-											status: TransactionStatus.Successful,
-										},
-									},
-								},
-								include: {
-									thumbMedia: true,
-									PaidPostTransaction: {
-										where: {
-											userId: BigInt(session.userId),
-											status: TransactionStatus.Successful,
-										},
-									},
-								},
-							},
-							thumbMedia: true,
-							postMedias: {
-								include: {
-									upload: true,
-									postMediaTags: {
-										include: {
-											user: true,
-										},
-									},
-								},
-							},
-						},
-						orderBy:
-							sort === "Latest"
-								? [
-										{ isPosted: "asc" },
-										{ isPinned: "desc" },
-										{ id: "desc" },
-								  ]
-								: sort === "Popular"
-								? [
-										{ isPosted: "asc" },
-										{ isPinned: "desc" },
-										{ comments: { _count: "desc" } },
-										{ postLikes: { _count: "desc" } },
-								  ]
-								: [{ isPosted: "asc" }, { isPinned: "desc" }],
-						take: size,
-						skip: (page - 1) * size,
-					}),
-				]);
+						}),
+					],
+				);
+
+				console.log(
+					"=======================================> accessiblePaidPosts ",
+					accessiblePaidPosts,
+					accessiblePaidPosts
+						.map((p) => p.id)
+						.includes(BigInt("153084048835059712")),
+				);
 
 				await Promise.all(
 					rows.map((p) =>
@@ -2246,13 +2377,13 @@ export default async function routes(fastify: FastifyTypebox) {
 							? metadata.find((m) => m.id === row.id)!._count
 									.postLikes > 0
 							: false,
-						isPaidOut:
-							metadata.find((m) => m.id === row.id) &&
-							metadata.find((m) => m.id === row.id)!.paidPost
-								? metadata.find((m) => m.id === row.id)!
-										.paidPost!.PaidPostTransaction.length >
-								  0
-								: false,
+						isPaidOut: row.paidPost
+							? metadata.find((m) => m.id === row.id)!.paidPost!
+									.PaidPostTransaction.length > 0 ||
+							  accessiblePaidPosts
+									.map((p) => p.id)
+									.includes(row.id)
+							: false,
 						isSelf,
 						isExclusive:
 							row.roles.length > 0 ||

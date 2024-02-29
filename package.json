@@ -58,6 +58,7 @@
 		"dinero.js": "^1.9.1",
 		"discord-api-types": "^0.37.60",
 		"dotenv": "^16.3.1",
+		"fast-geoip": "^1.1.88",
 		"fastify": "^4.25.2",
 		"fastify-multer": "^2.0.3",
 		"fastify-plugin": "^4.5.1",

@@ -13,6 +13,7 @@ import {
 	AuthResendReqBody,
 	AuthResetPasswordReqBody,
 	AuthVerifyCodeReqBody,
+	SessionIdParams,
 } from "./schemas.js";
 
 export const AuthPasswordRegisterReqBodyValidator = Type.Object({
@@ -146,3 +147,8 @@ export const AuthResendReqBodyValidator = Type.Object({
 	username: Type.Optional(Type.String()),
 });
 assert<Equals<Static<typeof AuthResendReqBodyValidator>, AuthResendReqBody>>();
+
+export const SessionIdParamValidator = Type.Object({
+	sessionId: Type.String(),
+});
+assert<Equals<Static<typeof SessionIdParamValidator>, SessionIdParams>>();

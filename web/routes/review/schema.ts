@@ -13,4 +13,5 @@ export interface ReviewCreateReqBody {
 	text?: string;
 	score: number;
 	creatorId: string;
+	tip: number;
 }

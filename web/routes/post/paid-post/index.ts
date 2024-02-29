@@ -11,7 +11,7 @@ import { IdParamsValidator } from "../../../../common/validators/validation.js";
 import { ModelConverter } from "../../../models/modelConverter.js";
 import { FastifyTypebox } from "../../../types.js";
 import { setInterval } from "node:timers/promises";
-import { TransactionStatus } from "@prisma/client";
+import { SubscriptionStatus, TransactionStatus } from "@prisma/client";
 import {
 	PaidPostRespBody,
 	PaidPostUpdateReqBody,
@@ -55,7 +55,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				const { id } = request.params;
 				const row = await prisma.paidPost.findFirst({
 					where: { id: BigInt(id) },
-					include: { thumbMedia: true },
+					include: { thumbs: { include: { upload: true } } },
 				});
 				if (!row)
 					return reply.sendError(
@@ -651,7 +651,7 @@ export default async function routes(fastify: FastifyTypebox) {
 									{ post: { updatedAt: "asc" } },
 							  ],
 					include: {
-						thumbMedia: true,
+						thumbs: { include: { upload: true } },
 						post: {
 							include: {
 								thumbMedia: true,
@@ -666,7 +666,9 @@ export default async function routes(fastify: FastifyTypebox) {
 									},
 								},
 								paidPost: {
-									include: { thumbMedia: true },
+									include: {
+										thumbs: { include: { upload: true } },
+									},
 								},
 								fundraiser: {
 									include: { thumbMedia: true },
@@ -923,7 +925,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				currentDate.getTime() - 24 * 60 * 60 * 1000,
 			);
 
-			const [rows, metadata] = await Promise.all([
+			const [rows, metadata, accessiblePaidPosts] = await Promise.all([
 				prisma.paidPost.findMany({
 					where: {
 						post: { profileId: profile.id, isPosted: true },
@@ -939,7 +941,7 @@ export default async function routes(fastify: FastifyTypebox) {
 									{ post: { updatedAt: "asc" } },
 							  ],
 					include: {
-						thumbMedia: true,
+						thumbs: { include: { upload: true } },
 						post: {
 							include: {
 								thumbMedia: true,
@@ -954,7 +956,9 @@ export default async function routes(fastify: FastifyTypebox) {
 									},
 								},
 								paidPost: {
-									include: { thumbMedia: true },
+									include: {
+										thumbs: { include: { upload: true } },
+									},
 								},
 								fundraiser: {
 									include: { thumbMedia: true },
@@ -1090,6 +1094,57 @@ export default async function routes(fastify: FastifyTypebox) {
 					take: size,
 					skip: (page - 1) * size,
 				}),
+				prisma.post.findMany({
+					where: {
+						paidPost: {
+							OR: [
+								{
+									rolePaidPosts: {
+										some: {
+											role: {
+												userLevels: {
+													some: {
+														userId: BigInt(
+															session.userId,
+														),
+													},
+												},
+											},
+										},
+									},
+								},
+								{
+									tierPaidPosts: {
+										some: {
+											tier: {
+												paymentSubscriptions: {
+													some: {
+														userId: BigInt(
+															session.userId,
+														),
+														status: SubscriptionStatus.Active,
+													},
+												},
+											},
+										},
+									},
+								},
+								{
+									userPaidPosts: {
+										some: {
+											user: {
+												id: BigInt(session.userId),
+											},
+										},
+									},
+								},
+							],
+						},
+					},
+					select: {
+						id: true,
+					},
+				}),
 			]);
 
 			await Promise.all(
@@ -1100,12 +1155,6 @@ export default async function routes(fastify: FastifyTypebox) {
 
 			const result: PostsRespBody = {
 				posts: rows.map((row) => {
-					const isPaidOut =
-						metadata.find((m) => m.id === row.id) &&
-						metadata.find((m) => m.id === row.id)!.post.paidPost
-							? metadata.find((m) => m.id === row.id)!.post
-									.paidPost!.PaidPostTransaction.length > 0
-							: false;
 					return {
 						...ModelConverter.toIPost(row.post, {
 							isBookmarked: metadata.find(
@@ -1132,7 +1181,10 @@ export default async function routes(fastify: FastifyTypebox) {
 									.paidPost
 									? metadata.find((m) => m.id === row.id)!
 											.post.paidPost!.PaidPostTransaction
-											.length > 0
+											.length > 0 ||
+									  accessiblePaidPosts
+											.map((p) => p.id)
+											.includes(row.postId)
 									: false,
 							isSelf: true,
 							isExclusive: row.post.roles.length > 0,
@@ -1208,7 +1260,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				where: { id: BigInt(post.paidPost.id) },
 				data: { isPinned: true },
 				include: {
-					thumbMedia: true,
+					thumbs: { include: { upload: true } },
 					post: {
 						include: {
 							thumbMedia: true,
@@ -1276,7 +1328,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				where: { id: BigInt(post.paidPost.id) },
 				data: { isPinned: false },
 				include: {
-					thumbMedia: true,
+					thumbs: { include: { upload: true } },
 					post: {
 						include: {
 							thumbMedia: true,
@@ -1377,7 +1429,7 @@ export default async function routes(fastify: FastifyTypebox) {
 									{ post: { updatedAt: "asc" } },
 							  ],
 					include: {
-						thumbMedia: true,
+						thumbs: { include: { upload: true } },
 						post: {
 							include: {
 								thumbMedia: true,
@@ -1392,7 +1444,9 @@ export default async function routes(fastify: FastifyTypebox) {
 									},
 								},
 								paidPost: {
-									include: { thumbMedia: true },
+									include: {
+										thumbs: { include: { upload: true } },
+									},
 								},
 								fundraiser: {
 									include: { thumbMedia: true },

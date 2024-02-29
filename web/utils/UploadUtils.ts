@@ -1,5 +1,6 @@
 import {
 	PaidPost,
+	PaidPostThumb,
 	Post,
 	PostMedia,
 	Upload,
@@ -88,14 +89,14 @@ interface PostMediaWithUpload extends PostMedia {
 	upload?: Upload | null;
 }
 
-interface SomethingWithThumbMedia {
-	thumbMedia?: Upload | null;
+interface SomethingWithThumbs {
+	thumbs?: (PaidPostThumb & { upload: Upload })[] | null;
 }
 
 interface PostWithMediaLike {
 	postMedias?: PostMediaWithUpload[] | null;
 	thumbMedia?: Upload | null;
-	paidPost?: SomethingWithThumbMedia | null | any;
+	paidPost?: SomethingWithThumbs | null;
 }
 
 export async function resolveURLsPostLike(
@@ -115,9 +116,11 @@ export async function resolveURLsPostLike(
 		);
 	}
 
-	if (post.paidPost?.thumbMedia) {
-		await resolveURLsUpload(
-			post.paidPost.thumbMedia,
+	if (post.paidPost?.thumbs) {
+		await resolveURLsUploads(
+			post.paidPost.thumbs
+				.filter((pp) => !!pp.upload)
+				.map((pp) => pp.upload!),
 			cloudflareStream,
 			mediaUpload,
 		);

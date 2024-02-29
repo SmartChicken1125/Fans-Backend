@@ -100,3 +100,7 @@ export interface AuthOAuth2LinkListRespBody {
 		};
 	};
 }
+
+export interface SessionIdParams {
+	sessionId: string;
+}

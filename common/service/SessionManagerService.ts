@@ -6,8 +6,10 @@ import {
 	User,
 } from "@prisma/client";
 import { Injectable } from "async-injection";
-import { preHandlerAsyncHookHandler } from "fastify";
+import { FastifyRequest, preHandlerAsyncHookHandler } from "fastify";
 import crypto from "node:crypto";
+import geoip from "fast-geoip";
+import lodash from "lodash";
 
 import { authAPIErrors } from "../APIErrors/auth.js";
 import { genericAPIErrors } from "../APIErrors/generic.js";
@@ -18,12 +20,24 @@ import RedisService from "./RedisService.js";
 interface SessionPayload {
 	version: number;
 	userId: string;
+	ip: string | null;
+	userAgent: string | null;
+	country: string | null;
+}
+
+interface LoginInfo {
+	ip: string | null;
+	userAgent: string | null;
+	country: string | null;
 }
 
 @Injectable()
 export class Session {
 	#redis: RedisService;
 	#signer: Signer;
+	#loginInfo: LoginInfo | null;
+	#cachedUserObject?: User;
+	#cachedProfileObject?: Profile;
 	sessionId: string;
 	userId: string;
 
@@ -35,28 +49,54 @@ export class Session {
 	) {
 		this.#redis = redis;
 		this.#signer = signer;
+		this.#loginInfo = null;
 		payload = this.#upgradePayload(payload);
 
 		this.sessionId = sessionId;
 		this.userId = payload.userId;
 
+		this.setLoginInfo(payload);
+
 		this.save();
 	}
 
 	#upgradePayload(payload: SessionPayload): SessionPayload {
-		if (payload.version === 1) {
+		if (payload.version === 2) {
 			return payload;
+		}
+		if (payload.version === 1) {
+			return {
+				...payload,
+				version: 2,
+				ip: null,
+				userAgent: null,
+				country: null,
+			};
 		}
 
 		throw new Error("Invalid payload version");
+	}
+
+	setLoginInfo(loginInfo: LoginInfo) {
+		this.#loginInfo = {
+			...this.#loginInfo,
+			...lodash.pick(loginInfo, ["ip", "userAgent", "country"]),
+		};
+	}
+
+	getLoginInfo(): LoginInfo | null {
+		return this.#loginInfo && { ...this.#loginInfo };
 	}
 
 	save() {
 		return this.#redis.set(
 			`sessions:${this.sessionId}`,
 			JSON.stringify({
-				version: 1,
+				version: 2,
 				userId: this.userId,
+				ip: this.#loginInfo?.ip,
+				userAgent: this.#loginInfo?.userAgent,
+				country: this.#loginInfo?.country,
 			}),
 			"EX",
 			SessionManagerService.MAX_AGE,
@@ -67,7 +107,12 @@ export class Session {
 		return this.#redis.del(`sessions:${this.sessionId}`);
 	}
 
-	async getAllSessionKeys(): Promise<string[]> {
+	async getAllSessionIds(): Promise<string[]> {
+		const keys = await this.getAllSessionKeys();
+		return keys.map((key) => key.replace("sessions:", ""));
+	}
+
+	private async getAllSessionKeys(): Promise<string[]> {
 		let cur = "0";
 		const sessions: string[] = [];
 
@@ -100,9 +145,15 @@ export class Session {
 	}
 
 	async getUser(prisma: PrismaService): Promise<User> {
+		if (this.#cachedUserObject) {
+			return this.#cachedUserObject;
+		}
+
 		const user = await prisma.user.findFirstOrThrow({
 			where: { id: BigInt(this.userId) },
 		});
+
+		this.#cachedUserObject = user;
 
 		return user;
 	}
@@ -128,9 +179,15 @@ export class Session {
 	}
 
 	async getProfile(prisma: PrismaService): Promise<Profile | null> {
+		if (this.#cachedProfileObject) {
+			return this.#cachedProfileObject;
+		}
+
 		const profile = await prisma.profile.findFirst({
 			where: { userId: BigInt(this.userId) },
 		});
+
+		this.#cachedProfileObject = profile || undefined;
 
 		return profile;
 	}
@@ -216,14 +273,10 @@ class SessionManagerService {
 	}
 
 	/**
-	 * @param token The authorization token
+	 * @param sessionId The id of the session
 	 * @returns Session or undefined if session or token is invalid or has expired.
 	 */
-	async getSessionFromToken(token: string): Promise<Session | undefined> {
-		const sessionId = this.#signer.unsign(token);
-
-		if (!sessionId) return undefined;
-
+	async getSessionFromId(sessionId: string): Promise<Session | undefined> {
 		const session = await this.#redis.get(`sessions:${sessionId}`);
 		if (!session) {
 			return undefined;
@@ -238,16 +291,45 @@ class SessionManagerService {
 	}
 
 	/**
+	 * @param token The authorization token
+	 * @returns Session or undefined if session or token is invalid or has expired.
+	 */
+	async getSessionFromToken(token: string): Promise<Session | undefined> {
+		const sessionId = this.#signer.unsign(token);
+
+		if (!sessionId) return undefined;
+
+		return this.getSessionFromId(sessionId);
+	}
+
+	/**
 	 * Creates a session.
 	 * @param id The user ID to create session for.
+	 * @param request Request which initiated session creation.
 	 */
-	async createSessionForUser(id: string): Promise<Session> {
+	async createSessionForUser(
+		id: string,
+		request?: FastifyRequest,
+	): Promise<Session> {
 		const sessionKey = crypto.randomBytes(24).toString("base64url");
 		const sessionId = `${id.toString()}.${sessionKey}`;
 
+		const ip = request?.ip || null;
+		const userAgent = request?.headers["user-agent"] || null;
+		let country = null;
+		if (request) {
+			const geo = await geoip.lookup(request.ip);
+			if (geo) {
+				country = geo.country;
+			}
+		}
+
 		const payload: SessionPayload = {
-			version: 1,
+			version: 2,
 			userId: id,
+			ip,
+			userAgent,
+			country,
 		};
 
 		const session = new Session(

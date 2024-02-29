@@ -25,7 +25,7 @@ import {
 	PlaylistFilterQueryValidator,
 	PlaylistUpdateReqBodyValidator,
 } from "./validation.js";
-import { TransactionStatus } from "@prisma/client";
+import { SubscriptionStatus, TransactionStatus } from "@prisma/client";
 
 export default async function routes(fastify: FastifyTypebox) {
 	const { container } = fastify;
@@ -147,7 +147,7 @@ export default async function routes(fastify: FastifyTypebox) {
 			const session = request.session!;
 			const profile = await session.getProfile(prisma);
 			const { id } = request.params;
-			const [row, metadata] = await Promise.all([
+			const [row, metadata, accessiblePaidPosts] = await Promise.all([
 				prisma.playlist.findFirst({
 					where: { id: BigInt(id) },
 					include: {
@@ -260,6 +260,57 @@ export default async function routes(fastify: FastifyTypebox) {
 						},
 					},
 				}),
+				prisma.post.findMany({
+					where: {
+						paidPost: {
+							OR: [
+								{
+									rolePaidPosts: {
+										some: {
+											role: {
+												userLevels: {
+													some: {
+														userId: BigInt(
+															session.userId,
+														),
+													},
+												},
+											},
+										},
+									},
+								},
+								{
+									tierPaidPosts: {
+										some: {
+											tier: {
+												paymentSubscriptions: {
+													some: {
+														userId: BigInt(
+															session.userId,
+														),
+														status: SubscriptionStatus.Active,
+													},
+												},
+											},
+										},
+									},
+								},
+								{
+									userPaidPosts: {
+										some: {
+											user: {
+												id: BigInt(session.userId),
+											},
+										},
+									},
+								},
+							],
+						},
+					},
+					select: {
+						id: true,
+					},
+				}),
 			]);
 			if (!row)
 				return reply.sendError(APIErrors.ITEM_NOT_FOUND("Playlist"));
@@ -295,7 +346,10 @@ export default async function routes(fastify: FastifyTypebox) {
 								? metadata?.posts.find(
 										(m) => m.postId === p.postId,
 								  )!.post.paidPost!.PaidPostTransaction.length >
-								  0
+										0 ||
+								  accessiblePaidPosts
+										.map((p) => p.id)
+										.includes(p.postId)
 								: false,
 						isSelf: p.post.profileId === profile?.id,
 						isExclusive:

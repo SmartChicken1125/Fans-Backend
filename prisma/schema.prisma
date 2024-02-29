@@ -230,6 +230,7 @@ model User {
     chatPaidPostTransaction         ChatPaidPostTransaction[]        @relation("ChatPaidPostTransactionUser")
     notificationsSettings           NotificationsSettings?
     userPosts                       UserPost[]
+    userPaidPosts                   UserPaidPost[]
     referentFanReferralTransactions FanReferralTransaction[]         @relation("ReferentFanReferralTransaction")
     referrerFanReferralTransactions FanReferralTransaction[]         @relation("ReferrerFanReferralTransaction")
     pollVotes                       PollVote[]
@@ -884,7 +885,8 @@ model Tier {
     updatedAt            DateTime              @updatedAt
     paymentSubscriptions PaymentSubscription[]
 
-    tierPosts TierPost[]
+    tierPosts     TierPost[]
+    tierPaidPosts TierPaidPost[]
 
     @@index([profileId], type: BTree)
     @@index([title], type: BTree)
@@ -1098,12 +1100,13 @@ model Role {
     level      Int
     updatedAt  DateTime @updatedAt
 
-    categories   RoleCategory[]
-    posts        RolePost[]
-    giveaways    RoleGiveaway[]
-    polls        RolePoll[]
-    Notification Notification[]
-    userLevels   UserLevel[]
+    categories    RoleCategory[]
+    posts         RolePost[]
+    giveaways     RoleGiveaway[]
+    polls         RolePoll[]
+    Notification  Notification[]
+    userLevels    UserLevel[]
+    rolePaidPosts RolePaidPost[]
 
     @@index([profileId], type: BTree)
     @@index([name], type: BTree)
@@ -1217,25 +1220,83 @@ model PostForm {
 }
 
 model PaidPost {
-    id                  BigInt                @id
-    post                Post                  @relation(fields: [postId], references: [id], onDelete: Cascade)
-    postId              BigInt                @unique
-    price               Float
-    currency            String
-    thumb               String?
-    thumbId             BigInt?
-    thumbMedia          Upload?               @relation(fields: [thumbId], references: [id], onDelete: Cascade)
-    updatedAt           DateTime              @updatedAt
+    id        BigInt   @id
+    post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+    postId    BigInt   @unique
+    price     Float
+    currency  String
+    updatedAt DateTime @updatedAt
+    isPinned  Boolean  @default(false)
+    isHidden  Boolean  @default(false)
+
+    thumbs              PaidPostThumb[]
+    rolePaidPosts       RolePaidPost[]
+    tierPaidPosts       TierPaidPost[]
+    userPaidPosts       UserPaidPost[]
     PaidPostTransaction PaidPostTransaction[]
-    isPinned            Boolean               @default(false)
-    isHidden            Boolean               @default(false)
 
     @@index([postId], type: BTree)
     @@index([price], type: BTree)
-    @@index([thumbId], type: BTree)
     @@index([currency], type: Hash)
     @@index([updatedAt], type: BTree)
     @@map("paid_posts")
+}
+
+model PaidPostThumb {
+    id         BigInt   @id
+    paidPost   PaidPost @relation(fields: [paidPostId], references: [id], onDelete: Cascade)
+    paidPostId BigInt
+    upload     Upload   @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+    uploadId   BigInt
+    updatedAt  DateTime @updatedAt
+
+    @@index([paidPostId], type: BTree)
+    @@index([uploadId], type: BTree)
+    @@index([updatedAt], type: BTree)
+    @@map("paid_post_thumbs")
+}
+
+model RolePaidPost {
+    id         BigInt   @id
+    role       Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+    roleId     BigInt
+    paidPost   PaidPost @relation(fields: [paidPostId], references: [id], onDelete: Cascade)
+    paidPostId BigInt
+	updatedAt  DateTime @updatedAt
+
+
+    @@index([roleId], type: BTree)
+    @@index([paidPostId], type: BTree)
+    @@index([updatedAt], type: BTree)
+    @@map("role_paid_posts")
+}
+
+model TierPaidPost {
+    id         BigInt   @id
+    tier       Tier     @relation(fields: [tierId], references: [id], onDelete: Cascade)
+    tierId     BigInt
+    paidPost   PaidPost @relation(fields: [paidPostId], references: [id], onDelete: Cascade)
+    paidPostId BigInt
+	updatedAt  DateTime @updatedAt
+
+    @@index([tierId], type: BTree)
+    @@index([paidPostId], type: BTree)
+    @@index([updatedAt], type: BTree)
+    @@map("tier_paid_posts")
+}
+
+model UserPaidPost {
+    id         BigInt   @id
+    user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+    userId     BigInt
+    paidPost   PaidPost @relation(fields: [paidPostId], references: [id], onDelete: Cascade)
+    paidPostId BigInt
+	updatedAt  DateTime @updatedAt
+
+    @@index([userId], type: BTree)
+    @@index([paidPostId], type: BTree)
+    @@index([updatedAt], type: BTree)
+    @@map("user_paid_posts")
 }
 
 model Fundraiser {
@@ -1455,7 +1516,6 @@ model Upload {
     postForm                        PostForm?
     postMedias                      PostMedia[]
     postThumbs                      Post[]
-    paidPostThumbs                  PaidPost[]
     fundraiserThumbs                Fundraiser[]
     giveawayThumbs                  Giveaway[]
     pollThumbs                      Poll[]
@@ -1468,6 +1528,7 @@ model Upload {
     customVideoPreviewUploads       CustomVideoPreviewUpload[]
     customVideoOrderRequestUploads  CustomVideoOrderRequestUpload[]
     customVideoOrderResponseUploads CustomVideoOrderResponseUpload[]
+    paidPostThumbs                  PaidPostThumb[]
 
     @@index([userId], type: BTree)
     @@index([type], type: Hash)

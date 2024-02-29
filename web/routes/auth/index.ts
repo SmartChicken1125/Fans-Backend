@@ -39,6 +39,7 @@ import {
 	AuthResetPasswordReqBody,
 	AuthUserInfoRespBody,
 	AuthVerifyCodeReqBody,
+	SessionIdParams,
 	TokenRespBody,
 } from "./schemas.js";
 import {
@@ -54,10 +55,14 @@ import {
 	AuthResendReqBodyValidator,
 	AuthResetPasswordReqBodyValidator,
 	AuthVerifyCodeReqBodyValidator,
+	SessionIdParamValidator,
 } from "./validation.js";
 import RedisService from "../../../common/service/RedisService.js";
 import { genOTP } from "../../../common/utils/OTPGenerator.js";
 import { User } from "@prisma/client";
+import { ISession } from "../../CommonAPISchemas.js";
+import { IdParams } from "../../../common/validators/schemas.js";
+import { IdParamsValidator } from "../../../common/validators/validation.js";
 
 const DECIMAL_TO_CENT_FACTOR = 100;
 
@@ -294,6 +299,7 @@ export default async function routes(
 
 			const session = await sessionManager.createSessionForUser(
 				created.id.toString(),
+				request,
 			);
 			const result: TokenRespBody = {
 				token: session.createToken(),
@@ -356,6 +362,7 @@ export default async function routes(
 			if (result === VerifyPasswordResult.OK) {
 				const session = await sessionManager.createSessionForUser(
 					user.id.toString(),
+					request,
 				);
 				const result: TokenRespBody = {
 					token: session.createToken(),
@@ -598,6 +605,7 @@ export default async function routes(
 			await sessionManager.destroySessionsForUser(user.id.toString());
 			const session = await sessionManager.createSessionForUser(
 				user.id.toString(),
+				request,
 			);
 			const result: TokenRespBody = {
 				token: session.createToken(),
@@ -644,6 +652,7 @@ export default async function routes(
 
 			const session = await sessionManager.createSessionForUser(
 				user.id.toString(),
+				request,
 			);
 
 			const result: TokenRespBody = { token: session.createToken() };
@@ -694,6 +703,7 @@ export default async function routes(
 
 			const session = await sessionManager.createSessionForUser(
 				user.id.toString(),
+				request,
 			);
 			const result: TokenRespBody = {
 				token: session.createToken(),
@@ -838,6 +848,7 @@ export default async function routes(
 
 				const session = await sessionManager.createSessionForUser(
 					account.userId.toString(),
+					request,
 				);
 
 				const result: TokenRespBody = {
@@ -892,6 +903,7 @@ export default async function routes(
 
 			const session = await sessionManager.createSessionForUser(
 				user.id.toString(),
+				request,
 			);
 
 			const result: TokenRespBody = { token: session.createToken() };
@@ -1050,6 +1062,111 @@ export default async function routes(
 			}
 
 			return reply.send(accountList);
+		},
+	);
+
+	fastify.get<{ Reply: ISession[] }>(
+		"/sessions",
+		{
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session!;
+
+			const sessionIds = await session.getAllSessionIds();
+			const sessions = sessionIds.map((id) => ({
+				id,
+				userId: session.userId,
+			}));
+
+			return reply.send(sessions);
+		},
+	);
+
+	fastify.get<{ Params: SessionIdParams; Reply: ISession }>(
+		"/sessions/:sessionId",
+		{
+			schema: { params: SessionIdParamValidator },
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session!;
+			const { sessionId } = request.params;
+
+			const sessionIds = await session.getAllSessionIds();
+			if (!sessionIds.includes(sessionId)) {
+				return reply.sendError(APIErrors.ITEM_NOT_FOUND("Session"));
+			}
+
+			return reply.send({ id: sessionId, userId: session.userId });
+		},
+	);
+
+	fastify.delete<{ Params: SessionIdParams; Reply: ISession }>(
+		"/sessions/:sessionId",
+		{
+			schema: { params: SessionIdParamValidator },
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session!;
+			const { sessionId } = request.params;
+
+			const sessionIds = await session.getAllSessionIds();
+			if (!sessionIds.includes(sessionId)) {
+				return reply.sendError(APIErrors.ITEM_NOT_FOUND("Session"));
+			}
+
+			const toDelete = await sessionManager.getSessionFromId(sessionId);
+			if (!toDelete) {
+				return reply.sendError(APIErrors.ITEM_NOT_FOUND("Session"));
+			}
+
+			await toDelete.destroy();
+
+			return reply.send({ id: sessionId, userId: session.userId });
+		},
+	);
+
+	fastify.delete(
+		"/sessions/other",
+		{
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session!;
+			await session.destroyOtherSessions();
+
+			return reply.send();
+		},
+	);
+
+	fastify.get<{ Reply: ISession }>(
+		"/sessions/current",
+		{
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session!;
+			return reply.send({
+				id: session.sessionId,
+				userId: session.userId,
+			});
 		},
 	);
 }

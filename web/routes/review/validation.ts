@@ -6,6 +6,7 @@ export const ReviewCreateReqBodyValidator = Type.Object({
 	text: Type.Optional(Type.String()),
 	score: Type.Number(),
 	creatorId: Type.String(),
+	tip: Type.Number(),
 });
 
 assert<
