@@ -91,6 +91,14 @@ export interface ChatAutomatedMessageWelcomeReqBody {
 	text: string;
 	image?: string;
 	enabled: boolean;
+	isDelayEnabled: boolean;
+	delay: number;
+}
+
+export interface UpdateChatAutomatedMessageWelcomeReqBody {
+	enabled: boolean;
+	isDelayEnabled: boolean;
+	delay: number;
 }
 
 export interface CreateMessageReportReqBody {

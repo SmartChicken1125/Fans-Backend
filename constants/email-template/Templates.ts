@@ -7,7 +7,7 @@ export const resetPasswordEmailContent = (code: string) =>
       </div>
       <p style="font-size:1.1em">Hello!</p>
       <p>You are receiving this email because we received a password reset request for your account.</p>
-      <p><a href="${process.env.PUBLIC_URL}/reset-password?code=${code}">Reset password</a></p>
+      <p><a href="${process.env.PUBLIC_URL}/auth/resetPassword?code=${code}">Reset password</a></p>
 	  <p>This link will expire in 24 hours after this email was sent.</p>
       <p>Regards, <br />FYP.Fans Team</p>
       <div style="border-top:1px solid #eee">

@@ -387,6 +387,7 @@ export default async function routes(fastify: FastifyTypebox) {
 								updatedAt: { gt: oneDayBefore },
 							},
 						},
+						disabled: false,
 					},
 					include: {
 						stories: {

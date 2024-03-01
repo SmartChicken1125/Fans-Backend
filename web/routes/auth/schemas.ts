@@ -13,12 +13,6 @@ import {
 export interface AuthPasswordRegisterReqBody {
 	email: string;
 	username: string;
-}
-
-export interface AuthPasswordVerifyRegisterReqBody {
-	email: string;
-	code: string;
-	username: string;
 	password: string;
 }
 
@@ -37,12 +31,13 @@ export interface AuthForgotPasswordReqBody {
 
 export interface AuthVerifyCodeReqBody {
 	code: string;
-	email: string;
 }
 
 export interface AuthResendReqBody {
-	email: string;
-	username?: string;
+	/**
+	 * Optional. If provided, will resend the code to the specified email address and upon verification, will update the email address of the user.
+	 */
+	email?: string;
 }
 
 export interface AuthResetPasswordReqBody {

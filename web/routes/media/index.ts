@@ -50,8 +50,6 @@ import {
 	PostMediaPageQueryValidator,
 	TusUploadReqBodyValidator,
 } from "./validation.js";
-import { ReadableStream } from "stream/web";
-import { Readable } from "stream";
 
 export default async function routes(fastify: FastifyTypebox) {
 	const { container } = fastify;
@@ -309,7 +307,7 @@ export default async function routes(fastify: FastifyTypebox) {
 			const { id: userId } = request.params;
 			const { page = 1, size = DEFAULT_PAGE_SIZE, type } = request.query;
 			const profile = await prisma.profile.findFirst({
-				where: { userId: BigInt(userId) },
+				where: { userId: BigInt(userId), disabled: false },
 			});
 			if (!profile) {
 				return reply.sendError(APIErrors.ITEM_NOT_FOUND("Profile"));
@@ -976,7 +974,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				await mfStream.finalize();
 				return reply.send(mfStream);
 			} else {
-				return reply.send("no data");
+				return reply.status(204).send();
 			}
 		},
 	);

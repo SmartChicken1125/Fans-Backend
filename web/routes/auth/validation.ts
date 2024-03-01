@@ -9,7 +9,6 @@ import {
 	AuthOAuth2LinkReqParams,
 	AuthPasswordLoginReqBody,
 	AuthPasswordRegisterReqBody,
-	AuthPasswordVerifyRegisterReqBody,
 	AuthResendReqBody,
 	AuthResetPasswordReqBody,
 	AuthVerifyCodeReqBody,
@@ -19,26 +18,13 @@ import {
 export const AuthPasswordRegisterReqBodyValidator = Type.Object({
 	email: Type.String(),
 	username: Type.String(),
+	password: Type.String(),
 });
 
 assert<
 	Equals<
 		Static<typeof AuthPasswordRegisterReqBodyValidator>,
 		AuthPasswordRegisterReqBody
-	>
->();
-
-export const AuthPasswordVerifyRegisterReqBodyValidator = Type.Object({
-	email: Type.String(),
-	code: Type.String(),
-	username: Type.String(),
-	password: Type.String(),
-});
-
-assert<
-	Equals<
-		Static<typeof AuthPasswordVerifyRegisterReqBodyValidator>,
-		AuthPasswordVerifyRegisterReqBody
 	>
 >();
 
@@ -112,7 +98,6 @@ assert<
 
 export const AuthVerifyCodeReqBodyValidator = Type.Object({
 	code: Type.String(),
-	email: Type.String(),
 });
 
 assert<
@@ -142,10 +127,11 @@ assert<
 	>
 >();
 
-export const AuthResendReqBodyValidator = Type.Object({
-	email: Type.String(),
-	username: Type.Optional(Type.String()),
-});
+export const AuthResendReqBodyValidator = Type.Optional(
+	Type.Object({
+		email: Type.Optional(Type.String()),
+	}),
+);
 assert<Equals<Static<typeof AuthResendReqBodyValidator>, AuthResendReqBody>>();
 
 export const SessionIdParamValidator = Type.Object({

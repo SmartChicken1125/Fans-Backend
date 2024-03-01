@@ -46,51 +46,44 @@ export default async function routes(fastify: FastifyTypebox) {
 			],
 		},
 		async (request, reply) => {
-			try {
-				const query = request.query;
-				const { page = 1, size = DEFAULT_PAGE_SIZE } = query;
-				const session = request.session!;
-				const profile = (await session.getProfile(prisma))!;
+			const query = request.query;
+			const { page = 1, size = DEFAULT_PAGE_SIZE } = query;
+			const session = request.session!;
+			const profile = (await session.getProfile(prisma))!;
 
-				const total = await prisma.category.count({
-					where: { profileId: profile.id },
-					orderBy: { order: "asc" },
-				});
+			const total = await prisma.category.count({
+				where: { profileId: profile.id },
+				orderBy: { order: "asc" },
+			});
 
-				if (isOutOfRange(page, size, total)) {
-					return reply.sendError(APIErrors.OUT_OF_RANGE);
-				}
-				const categories = await prisma.category.findMany({
-					where: { profileId: profile.id },
-					include: {
-						_count: {
-							select: { posts: true },
-						},
-						roles: {
-							include: { role: true },
-						},
-					},
-					orderBy: { order: "asc" },
-					take: size,
-					skip: (page - 1) * size,
-				});
-
-				const result: CategoriesRespBody = {
-					categories: categories.map((c) => ({
-						...ModelConverter.toICategory(c),
-						roles: c.roles.map((r) =>
-							ModelConverter.toIRole(r.role),
-						),
-					})),
-					page,
-					size,
-					total,
-				};
-				return reply.send(result);
-			} catch (err) {
-				request.log.error(err, "Error on get all categories");
-				return reply.sendError(APIErrors.GENERIC_ERROR);
+			if (isOutOfRange(page, size, total)) {
+				return reply.sendError(APIErrors.OUT_OF_RANGE);
 			}
+			const categories = await prisma.category.findMany({
+				where: { profileId: profile.id },
+				include: {
+					_count: {
+						select: { posts: true },
+					},
+					roles: {
+						include: { role: true },
+					},
+				},
+				orderBy: { order: "asc" },
+				take: size,
+				skip: (page - 1) * size,
+			});
+
+			const result: CategoriesRespBody = {
+				categories: categories.map((c) => ({
+					...ModelConverter.toICategory(c),
+					roles: c.roles.map((r) => ModelConverter.toIRole(r.role)),
+				})),
+				page,
+				size,
+				total,
+			};
+			return reply.send(result);
 		},
 	);
 
@@ -106,57 +99,47 @@ export default async function routes(fastify: FastifyTypebox) {
 		async (request, reply) => {
 			const session = request.session!;
 			const { id } = request.params;
-			try {
-				const row = await prisma.category.findFirst({
-					where: { id: BigInt(id) },
-					include: {
-						_count: {
-							select: { posts: true },
-						},
-						roles: {
-							include: { role: true },
-						},
-						posts: {
-							include: {
-								post: {
-									include: {
-										thumbMedia: true,
-										postMedias: {
-											include: {
-												upload: true,
-											},
+
+			const row = await prisma.category.findFirst({
+				where: { id: BigInt(id) },
+				include: {
+					_count: {
+						select: { posts: true },
+					},
+					roles: {
+						include: { role: true },
+					},
+					posts: {
+						include: {
+							post: {
+								include: {
+									thumbMedia: true,
+									postMedias: {
+										include: {
+											upload: true,
 										},
 									},
 								},
 							},
 						},
 					},
-				});
-				if (!row)
-					return reply.sendError(
-						APIErrors.ITEM_NOT_FOUND("Category"),
-					);
+				},
+			});
+			if (!row)
+				return reply.sendError(APIErrors.ITEM_NOT_FOUND("Category"));
 
-				await Promise.all(
-					row.posts.map((p) =>
-						resolveURLsPostLike(
-							p.post,
-							cloudflareStream,
-							mediaUpload,
-						),
-					),
-				);
+			await Promise.all(
+				row.posts.map((p) =>
+					resolveURLsPostLike(p.post, cloudflareStream, mediaUpload),
+				),
+			);
 
-				const result: CategoryRespBody = {
-					...ModelConverter.toICategory(row),
-					roles: row.roles.map((r) => ModelConverter.toIRole(r.role)),
-					posts: row.posts.map((p) => ModelConverter.toIPost(p.post)),
-				};
-				return reply.status(200).send(result);
-			} catch (err) {
-				request.log.error(err, `Error on get categories/${id}`);
-				return reply.sendError(APIErrors.GENERIC_ERROR);
-			}
+			const result: CategoryRespBody = {
+				...ModelConverter.toICategory(row),
+				roles: row.roles.map((r) => ModelConverter.toIRole(r.role)),
+				posts: row.posts.map((p) => ModelConverter.toIPost(p.post)),
+			};
+			return reply.status(200).send(result);
 		},
 	);
 
@@ -173,75 +156,67 @@ export default async function routes(fastify: FastifyTypebox) {
 			],
 		},
 		async (request, reply) => {
-			try {
-				const session = request.session!;
-				const profile = (await session.getProfile(prisma))!;
-				const { name, isActive, postIds, roleIds, order } =
-					request.body;
-				const categoryCount = await prisma.category.count({
-					where: { profileId: profile.id },
-				});
+			const session = request.session!;
+			const profile = (await session.getProfile(prisma))!;
+			const { name, isActive, postIds, roleIds, order } = request.body;
+			const categoryCount = await prisma.category.count({
+				where: { profileId: profile.id },
+			});
 
-				if (categoryCount >= maxObjectLimit) {
-					return reply.sendError(APIErrors.REACHED_MAX_OBJECT_LIMIT);
-				}
-
-				const row = await prisma.category.findFirst({
-					where: {
-						name,
-						profileId: profile.id,
-					},
-				});
-				if (row)
-					return reply.sendError(
-						APIErrors.INVALID_REQUEST("Category is already exist!"),
-					);
-				const created = await prisma.category.create({
-					data: {
-						id: snowflake.gen(),
-						name,
-						profileId: profile.id,
-						isActive: isActive ? isActive : true,
-						order,
-						posts:
-							postIds && postIds.length > 0
-								? {
-										createMany: {
-											data: postIds.map((p) => ({
-												id: snowflake.gen(),
-												postId: BigInt(p),
-											})),
-										},
-								  }
-								: undefined,
-						roles:
-							roleIds && roleIds.length > 0
-								? {
-										createMany: {
-											data: roleIds.map((r) => ({
-												id: snowflake.gen(),
-												roleId: BigInt(r),
-											})),
-										},
-								  }
-								: undefined,
-					},
-					include: {
-						roles: { include: { role: true } },
-					},
-				});
-
-				const result: CategoryRespBody = {
-					...ModelConverter.toICategory(created),
-					roles: created.roles.map((r) =>
-						ModelConverter.toIRole(r.role),
-					),
-				};
-				return reply.status(201).send(result);
-			} catch (err) {
-				request.log.error(err, "Error on create categories");
-				return reply.sendError(APIErrors.GENERIC_ERROR);
+			if (categoryCount >= maxObjectLimit) {
+				return reply.sendError(APIErrors.REACHED_MAX_OBJECT_LIMIT);
 			}
+
+			const row = await prisma.category.findFirst({
+				where: {
+					name,
+					profileId: profile.id,
+				},
+			});
+			if (row)
+				return reply.sendError(
+					APIErrors.INVALID_REQUEST("Category is already exist!"),
+				);
+			const created = await prisma.category.create({
+				data: {
+					id: snowflake.gen(),
+					name,
+					profileId: profile.id,
+					isActive: isActive ? isActive : true,
+					order,
+					posts:
+						postIds && postIds.length > 0
+							? {
+									createMany: {
+										data: postIds.map((p) => ({
+											id: snowflake.gen(),
+											postId: BigInt(p),
+										})),
+									},
+							  }
+							: undefined,
+					roles:
+						roleIds && roleIds.length > 0
+							? {
+									createMany: {
+										data: roleIds.map((r) => ({
+											id: snowflake.gen(),
+											roleId: BigInt(r),
+										})),
+									},
+							  }
+							: undefined,
+				},
+				include: {
+					roles: { include: { role: true } },
+				},
+			});
+
+			const result: CategoryRespBody = {
+				...ModelConverter.toICategory(created),
+				roles: created.roles.map((r) => ModelConverter.toIRole(r.role)),
+			};
+			return reply.status(201).send(result);
 		},
 	);
 
@@ -294,56 +269,49 @@ export default async function routes(fastify: FastifyTypebox) {
 				);
 			}
 
-			try {
-				await prisma.category.update({
-					where: { id: BigInt(id) },
-					data: {
-						name,
-						isActive,
-						order,
-						roles: {
-							deleteMany:
-								roleIdsToRemove.length > 0
-									? roleIdsToRemove.map((p) => ({
+			await prisma.category.update({
+				where: { id: BigInt(id) },
+				data: {
+					name,
+					isActive,
+					order,
+					roles: {
+						deleteMany:
+							roleIdsToRemove.length > 0
+								? roleIdsToRemove.map((p) => ({
+										roleId: BigInt(p),
+								  }))
+								: undefined,
+						createMany:
+							roleIdsToAdd.length > 0
+								? {
+										data: roleIdsToAdd.map((p) => ({
+											id: snowflake.gen(),
 											roleId: BigInt(p),
-									  }))
-									: undefined,
-							createMany:
-								roleIdsToAdd.length > 0
-									? {
-											data: roleIdsToAdd.map((p) => ({
-												id: snowflake.gen(),
-												roleId: BigInt(p),
-											})),
-									  }
-									: undefined,
-						},
-						posts: {
-							deleteMany:
-								postIdsToRemove.length > 0
-									? postIdsToRemove.map((p) => ({
-											postId: BigInt(p),
-									  }))
-									: undefined,
-							createMany:
-								postIdsToAdd.length > 0
-									? {
-											data: postIdsToAdd.map((p) => ({
-												id: snowflake.gen(),
-												postId: BigInt(p),
-											})),
-									  }
-									: undefined,
-						},
+										})),
+								  }
+								: undefined,
 					},
-				});
-				return reply
-					.status(202)
-					.send({ message: "Category is updated!" });
-			} catch (err) {
-				request.log.error(err, `Error on update categories/${id}`);
-				return reply.sendError(APIErrors.GENERIC_ERROR);
-			}
+					posts: {
+						deleteMany:
+							postIdsToRemove.length > 0
+								? postIdsToRemove.map((p) => ({
+										postId: BigInt(p),
+								  }))
+								: undefined,
+						createMany:
+							postIdsToAdd.length > 0
+								? {
+										data: postIdsToAdd.map((p) => ({
+											id: snowflake.gen(),
+											postId: BigInt(p),
+										})),
+								  }
+								: undefined,
+					},
+				},
+			});
+			return reply.status(202).send({ message: "Category is updated!" });
 		},
 	);
 

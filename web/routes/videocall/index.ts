@@ -58,7 +58,7 @@ export default async function routes(fastify: FastifyTypebox) {
 			const session = request.session!;
 
 			const creator = await prisma.profile.findFirst({
-				where: { id: BigInt(request.params.hostId) },
+				where: { id: BigInt(request.params.hostId), disabled: false },
 			});
 			if (!creator || creator.userId === BigInt(session.userId)) {
 				return reply.sendError(
@@ -123,7 +123,7 @@ export default async function routes(fastify: FastifyTypebox) {
 		},
 		async (request, reply) => {
 			const creator = await prisma.profile.findFirst({
-				where: { id: BigInt(request.query.creatorId) },
+				where: { id: BigInt(request.query.creatorId), disabled: false },
 			});
 			if (!creator) {
 				return reply.sendError(

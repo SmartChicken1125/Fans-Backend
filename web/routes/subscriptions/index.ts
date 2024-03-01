@@ -711,7 +711,9 @@ export default async function routes(
 				const creator = await prisma.profile.findUnique({
 					where: { id: creatorId },
 					select: {
+						id: true,
 						notificationsSettings: true,
+						userId: true,
 						user: true,
 					},
 				});
@@ -757,40 +759,51 @@ export default async function routes(
 
 				const welcomeMessage = await prisma.welcomeMessage.findFirst({
 					where: {
-						profileId: creatorId,
+						profileId: creator.id,
 					},
 				});
 
 				if (welcomeMessage?.enabled) {
 					const { text, image } = welcomeMessage;
 
-					const channel = await inboxManager.getOrCreateConversation(
-						creator.user!.id,
-						user.id,
-					);
+					if (welcomeMessage.isDelayEnabled) {
+						const queue =
+							bullMQService.createQueue("scheduledMessage");
+						const delay = welcomeMessage.delay * 60 * 1000;
+						await queue.add(
+							"scheduledMessage",
+							{
+								profileId: creator.id,
+								userId: creator.userId,
+								fanId: user.id,
+							},
+							{ delay },
+						);
+					} else {
+						const channel =
+							await inboxManager.getOrCreateConversation(
+								creator.userId,
+								user.id,
+							);
 
-					if (text) {
-						inboxManager.createMessage({
-							messageType: MessageType.TEXT,
-							channelId: channel.inbox.channelId,
-							userId: creator.user!.id,
-							content: text,
-						});
+						if (text) {
+							inboxManager.createMessage({
+								messageType: MessageType.TEXT,
+								channelId: channel.inbox.channelId,
+								userId: creator.userId,
+								content: text,
+							});
+						}
+
+						if (image) {
+							inboxManager.createMessage({
+								messageType: MessageType.MEDIA,
+								channelId: channel.inbox.channelId,
+								userId: creator.userId,
+								uploadIds: [image],
+							});
+						}
 					}
-
-					// TODO: Add image support
-					// 1. use image uploads of usage type chat (mostly needs implementation on frontend)
-					// 2. save the upload ids in WelcomeMessage model
-					// 3. send the image message here
-
-					// if (image) {
-					// 	inboxManager.createMessage({
-					// 		messageType: MessageType.IMAGE,
-					// 		channelId: channel.inbox.channelId,
-					// 		userId: creator.userId,
-					// 		uploadIds: ...
-					// 	});
-					// }
 				}
 			})();
 
@@ -1809,34 +1822,44 @@ export default async function routes(
 					if (welcomeMessage?.enabled) {
 						const { text, image } = welcomeMessage;
 
-						const channel =
-							await inboxManager.getOrCreateConversation(
-								creator.userId,
-								fan.id,
+						if (welcomeMessage.isDelayEnabled) {
+							const queue =
+								bullMQService.createQueue("scheduledMessage");
+							const delay = welcomeMessage.delay * 60 * 1000;
+							await queue.add(
+								"scheduledMessage",
+								{
+									profileId: creator.id,
+									userId: creator.userId,
+									fanId: fan.id,
+								},
+								{ delay },
 							);
+						} else {
+							const channel =
+								await inboxManager.getOrCreateConversation(
+									creator.userId,
+									fan.id,
+								);
 
-						if (text) {
-							inboxManager.createMessage({
-								messageType: MessageType.TEXT,
-								channelId: channel.inbox.channelId,
-								userId: creator.userId,
-								content: text,
-							});
+							if (text) {
+								inboxManager.createMessage({
+									messageType: MessageType.TEXT,
+									channelId: channel.inbox.channelId,
+									userId: creator.userId,
+									content: text,
+								});
+							}
+
+							if (image) {
+								inboxManager.createMessage({
+									messageType: MessageType.MEDIA,
+									channelId: channel.inbox.channelId,
+									userId: creator.userId,
+									uploadIds: [image],
+								});
+							}
 						}
-
-						// TODO: Add image support
-						// 1. use image uploads of usage type chat (mostly needs implementation on frontend)
-						// 2. save the upload ids in WelcomeMessage model
-						// 3. send the image message here
-
-						// if (image) {
-						// 	inboxManager.createMessage({
-						// 		messageType: MessageType.IMAGE,
-						// 		channelId: channel.inbox.channelId,
-						// 		userId: creator.userId,
-						// 		uploadIds: ...
-						// 	});
-						// }
 					}
 				}
 			})();

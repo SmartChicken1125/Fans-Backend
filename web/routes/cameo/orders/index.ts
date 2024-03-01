@@ -98,7 +98,7 @@ export default async function routes(fastify: FastifyTypebox) {
 			}
 
 			const creator = await prisma.profile.findFirst({
-				where: { id: BigInt(creatorId) },
+				where: { id: BigInt(creatorId), disabled: false },
 			});
 			if (!creator || creator.userId === BigInt(session.userId)) {
 				return reply.sendError(APIErrors.INVALID_CAMEO_HOST(creatorId));

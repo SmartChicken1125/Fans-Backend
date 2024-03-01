@@ -44,25 +44,21 @@ export default async function routes(fastify: FastifyTypebox) {
 			],
 		},
 		async (request, reply) => {
-			try {
-				const session = request.session!;
-				const profile = (await session.getProfile(prisma))!;
-				const { explicitCommentFilter } = request.body;
-				const { id } = request.params;
+			const session = request.session!;
+			const profile = (await session.getProfile(prisma))!;
+			const { explicitCommentFilter } = request.body;
+			const { id } = request.params;
 
-				if (profile.id !== BigInt(id)) {
-					return reply.sendError(APIErrors.PERMISSION_ERROR);
-				}
-
-				await prisma.profile.update({
-					where: { id: BigInt(id) },
-					data: { explicitCommentFilter },
-				});
-
-				return reply.send({ message: "Success!" });
-			} catch (err) {
-				return reply.sendError(APIErrors.GENERIC_ERROR);
+			if (profile.id !== BigInt(id)) {
+				return reply.sendError(APIErrors.PERMISSION_ERROR);
 			}
+
+			await prisma.profile.update({
+				where: { id: BigInt(id) },
+				data: { explicitCommentFilter },
+			});
+
+			return reply.send();
 		},
 	);
 
@@ -80,25 +76,21 @@ export default async function routes(fastify: FastifyTypebox) {
 			],
 		},
 		async (request, reply) => {
-			try {
-				const session = request.session!;
-				const profile = (await session.getProfile(prisma))!;
-				const { hideComments } = request.body;
-				const { id } = request.params;
+			const session = request.session!;
+			const profile = (await session.getProfile(prisma))!;
+			const { hideComments } = request.body;
+			const { id } = request.params;
 
-				if (profile.id !== BigInt(id)) {
-					return reply.sendError(APIErrors.PERMISSION_ERROR);
-				}
-
-				await prisma.profile.update({
-					where: { id: BigInt(id) },
-					data: { hideComments },
-				});
-
-				return reply.send({ message: "Success!" });
-			} catch (err) {
-				return reply.sendError(APIErrors.GENERIC_ERROR);
+			if (profile.id !== BigInt(id)) {
+				return reply.sendError(APIErrors.PERMISSION_ERROR);
 			}
+
+			await prisma.profile.update({
+				where: { id: BigInt(id) },
+				data: { hideComments },
+			});
+
+			return reply.send();
 		},
 	);
 
@@ -116,25 +108,21 @@ export default async function routes(fastify: FastifyTypebox) {
 			],
 		},
 		async (request, reply) => {
-			try {
-				const session = request.session!;
-				const profile = (await session.getProfile(prisma))!;
-				const { hideLikes } = request.body;
-				const { id } = request.params;
+			const session = request.session!;
+			const profile = (await session.getProfile(prisma))!;
+			const { hideLikes } = request.body;
+			const { id } = request.params;
 
-				if (profile.id !== BigInt(id)) {
-					return reply.sendError(APIErrors.PERMISSION_ERROR);
-				}
-
-				await prisma.profile.update({
-					where: { id: BigInt(id) },
-					data: { hideLikes },
-				});
-
-				return reply.send({ message: "Success!" });
-			} catch (err) {
-				return reply.sendError(APIErrors.GENERIC_ERROR);
+			if (profile.id !== BigInt(id)) {
+				return reply.sendError(APIErrors.PERMISSION_ERROR);
 			}
+
+			await prisma.profile.update({
+				where: { id: BigInt(id) },
+				data: { hideLikes },
+			});
+
+			return reply.send();
 		},
 	);
 
@@ -152,25 +140,21 @@ export default async function routes(fastify: FastifyTypebox) {
 			],
 		},
 		async (request, reply) => {
-			try {
-				const session = request.session!;
-				const profile = (await session.getProfile(prisma))!;
-				const { hideTips } = request.body;
-				const { id } = request.params;
+			const session = request.session!;
+			const profile = (await session.getProfile(prisma))!;
+			const { hideTips } = request.body;
+			const { id } = request.params;
 
-				if (profile.id !== BigInt(id)) {
-					return reply.sendError(APIErrors.PERMISSION_ERROR);
-				}
-
-				await prisma.profile.update({
-					where: { id: BigInt(id) },
-					data: { hideTips },
-				});
-
-				return reply.send({ message: "Success!" });
-			} catch (err) {
-				return reply.sendError(APIErrors.GENERIC_ERROR);
+			if (profile.id !== BigInt(id)) {
+				return reply.sendError(APIErrors.PERMISSION_ERROR);
 			}
+
+			await prisma.profile.update({
+				where: { id: BigInt(id) },
+				data: { hideTips },
+			});
+
+			return reply.send();
 		},
 	);
 
@@ -185,19 +169,15 @@ export default async function routes(fastify: FastifyTypebox) {
 			],
 		},
 		async (request, reply) => {
-			try {
-				const session = request.session!;
-				const { showProfile } = request.body;
+			const session = request.session!;
+			const { showProfile } = request.body;
 
-				await prisma.profile.update({
-					where: { userId: BigInt(session.userId) },
-					data: { showProfile },
-				});
+			await prisma.profile.update({
+				where: { userId: BigInt(session.userId) },
+				data: { showProfile },
+			});
 
-				return reply.send({ message: "Success!" });
-			} catch (error) {
-				return reply.sendError(APIErrors.GENERIC_ERROR);
-			}
+			return reply.send();
 		},
 	);
 
@@ -215,25 +195,20 @@ export default async function routes(fastify: FastifyTypebox) {
 			],
 		},
 		async (request, reply) => {
-			try {
-				const session = request.session!;
-				const profile = (await session.getProfile(prisma))!;
-				const { watermark } = request.body;
-				const { id } = request.params;
+			const session = request.session!;
+			const profile = (await session.getProfile(prisma))!;
+			const { watermark } = request.body;
+			const { id } = request.params;
 
-				if (profile.id !== BigInt(id)) {
-					return reply.sendError(APIErrors.PERMISSION_ERROR);
-				}
-
-				await prisma.profile.update({
-					where: { id: BigInt(id) },
-					data: { watermark },
-				});
-
-				return reply.send({ message: "Success!" });
-			} catch (err) {
-				return reply.sendError(APIErrors.GENERIC_ERROR);
+			if (profile.id !== BigInt(id)) {
+				return reply.sendError(APIErrors.PERMISSION_ERROR);
 			}
+
+			await prisma.profile.update({
+				where: { id: BigInt(id) },
+				data: { watermark },
+			});
+			return reply.send();
 		},
 	);
 
@@ -253,32 +228,28 @@ export default async function routes(fastify: FastifyTypebox) {
 			const session = request.session!;
 			const profile = (await session.getProfile(prisma))!;
 			const { creatorId, userId } = request.params;
-			try {
-				if (profile.id !== BigInt(creatorId)) {
-					return reply.sendError(APIErrors.PERMISSION_ERROR);
-				}
 
-				const existedRow = await prisma.limitUser.findFirst({
-					where: {
-						creatorId: BigInt(creatorId),
-						userId: BigInt(userId),
-					},
-				});
-
-				if (existedRow) {
-					return reply.sendError(APIErrors.DUPLICATED_LIMIT_USER);
-				}
-				const created = await prisma.limitUser.create({
-					data: {
-						creatorId: BigInt(creatorId),
-						userId: BigInt(userId),
-					},
-				});
-				return reply.send({ message: "Limit user is created!" });
-			} catch (error) {
-				console.log(error);
-				return reply.sendError(APIErrors.GENERIC_ERROR);
+			if (profile.id !== BigInt(creatorId)) {
+				return reply.sendError(APIErrors.PERMISSION_ERROR);
 			}
+
+			const existedRow = await prisma.limitUser.findFirst({
+				where: {
+					creatorId: BigInt(creatorId),
+					userId: BigInt(userId),
+				},
+			});
+
+			if (existedRow) {
+				return reply.sendError(APIErrors.DUPLICATED_LIMIT_USER);
+			}
+			const created = await prisma.limitUser.create({
+				data: {
+					creatorId: BigInt(creatorId),
+					userId: BigInt(userId),
+				},
+			});
+			return reply.send();
 		},
 	);
 
@@ -296,33 +267,29 @@ export default async function routes(fastify: FastifyTypebox) {
 			],
 		},
 		async (request, reply) => {
-			try {
-				const session = request.session!;
-				const profile = (await session.getProfile(prisma))!;
-				const {
+			const session = request.session!;
+			const profile = (await session.getProfile(prisma))!;
+			const {
+				isFanReferralEnabled,
+				fanReferralShare,
+				marketingContentLink,
+			} = request.body;
+			const { id } = request.params;
+
+			if (profile.id !== BigInt(id)) {
+				return reply.sendError(APIErrors.PERMISSION_ERROR);
+			}
+
+			await prisma.profile.update({
+				where: { id: BigInt(id) },
+				data: {
 					isFanReferralEnabled,
 					fanReferralShare,
 					marketingContentLink,
-				} = request.body;
-				const { id } = request.params;
+				},
+			});
 
-				if (profile.id !== BigInt(id)) {
-					return reply.sendError(APIErrors.PERMISSION_ERROR);
-				}
-
-				await prisma.profile.update({
-					where: { id: BigInt(id) },
-					data: {
-						isFanReferralEnabled,
-						fanReferralShare,
-						marketingContentLink,
-					},
-				});
-
-				return reply.send();
-			} catch (err) {
-				return reply.sendError(APIErrors.GENERIC_ERROR);
-			}
+			return reply.send();
 		},
 	);
 }

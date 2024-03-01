@@ -135,9 +135,10 @@ export class Session {
 		const sessionKeys = await this.getAllSessionKeys();
 		const currentSessionKey = `sessions:${this.sessionId}`;
 
-		await this.#redis.del(
-			...sessionKeys.filter((key) => key !== currentSessionKey),
-		);
+		const toDelete = sessionKeys.filter((key) => key !== currentSessionKey);
+		if (toDelete.length) {
+			await this.#redis.del(...toDelete);
+		}
 	}
 
 	createToken(): string {
@@ -208,10 +209,21 @@ class SessionManagerService {
 	sessionPreHandler: preHandlerAsyncHookHandler;
 
 	/**
-	 * A request-pre handler that checks if the user is authenticated and if not, returns a 401.
+	 * A request-pre handler that checks if the user is authenticated and if not, returns an UNAUTHORIZED error.
+	 * It also checks if the user has verified their email and if not, returns an VERIFICATION_REQUIRED error.
 	 */
 	requireAuthHandler: preHandlerAsyncHookHandler;
 
+	/**
+	 * A request-pre handler that checks if the user is authenticated and if not, returns an UNAUTHORIZED error.
+	 * Pretty much the same as requireAuthHandler, but it doesn't check if the user has verified their email.
+	 */
+	requireAuthNoVerificationHandler: preHandlerAsyncHookHandler;
+
+	/**
+	 * A request pre-handler that checks if the user is authenticated and has a profile.
+	 * If not, returns an UNAUTHORIZED error.
+	 */
 	requireProfileHandler: preHandlerAsyncHookHandler;
 
 	constructor(prisma: PrismaService, redis: RedisService) {
@@ -248,9 +260,21 @@ class SessionManagerService {
 			}
 		};
 
+		this.requireAuthNoVerificationHandler = async (request, reply) => {
+			if (!request.session) {
+				reply.sendError(authAPIErrors.UNAUTHORIZED);
+			}
+		};
+
 		this.requireAuthHandler = async (request, reply) => {
 			if (!request.session) {
 				reply.sendError(authAPIErrors.UNAUTHORIZED);
+			}
+
+			const user = await request.session!.getUser(this.#prisma);
+
+			if (!user.verifiedAt) {
+				reply.sendError(authAPIErrors.USER_NOT_VERIFIED);
 			}
 		};
 

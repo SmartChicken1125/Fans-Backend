@@ -18,6 +18,7 @@ import { getFastifyCORSConfig } from "../common/utils/FastifyCORS.js";
 import { ajvSnowflakeFormat } from "../common/validators/validation.js";
 import scheduledPost from "./workers/scheduledPost.js";
 import scheduledNotification from "./workers/scheduledNotification.js";
+import scheduledWelcomeMessage from "./workers/scheduledWelcomeMessage.js";
 import { startWatching } from "./emailTemplates/components/stylesheet.js";
 import scheduledMeeting from "./workers/scheduledMeeting.js";
 import scheduledCameo from "./workers/scheduledCameo.js";
@@ -34,6 +35,7 @@ export default async function main(container: Container) {
 	await scheduledMeeting(container);
 	await scheduledCameo(container);
 	await scheduledVideoCall(container);
+	await scheduledWelcomeMessage(container);
 	await startWatching(container);
 
 	const host = process.env.HOST_API ?? "::";

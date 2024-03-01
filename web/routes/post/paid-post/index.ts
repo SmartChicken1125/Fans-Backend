@@ -893,7 +893,7 @@ export default async function routes(fastify: FastifyTypebox) {
 			const { id: userId } = request.params;
 			const session = request.session!;
 			const profile = await prisma.profile.findFirst({
-				where: { userId: BigInt(userId) },
+				where: { userId: BigInt(userId), disabled: false },
 			});
 
 			if (!profile) {

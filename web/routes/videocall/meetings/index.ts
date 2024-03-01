@@ -79,7 +79,7 @@ export default async function routes(fastify: FastifyTypebox) {
 			}
 
 			const creator = await prisma.profile.findFirst({
-				where: { id: BigInt(request.body.hostId) },
+				where: { id: BigInt(request.body.hostId), disabled: false },
 			});
 			if (!creator || creator.userId === BigInt(session.userId)) {
 				return reply.sendError(

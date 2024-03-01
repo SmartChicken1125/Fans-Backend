@@ -453,9 +453,9 @@ enum SubscriptionStatus {
 
 model PaymentSubscription {
     id                              BigInt                           @id
-    user                            User                             @relation(name: "SubscriptionUser", fields: [userId], references: [id], onDelete: Cascade)
+    user                            User                             @relation(name: "SubscriptionUser", fields: [userId], references: [id], onDelete: Restrict)
     userId                          BigInt
-    creator                         Profile                          @relation(name: "SubscriptionCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+    creator                         Profile                          @relation(name: "SubscriptionCreator", fields: [creatorId], references: [id], onDelete: Restrict)
     creatorId                       BigInt
     paymentMethod                   PaymentMethod?                   @relation(fields: [paymentMethodId], references: [id])
     paymentMethodId                 BigInt?
@@ -508,9 +508,9 @@ model PaymentSubscription {
 
 model PaymentSubscriptionTransaction {
     id                    BigInt              @id
-    user                  User                @relation(name: "PaymentSubscriptionUser", fields: [userId], references: [id], onDelete: Cascade)
+    user                  User                @relation(name: "PaymentSubscriptionUser", fields: [userId], references: [id], onDelete: Restrict)
     userId                BigInt
-    creator               Profile             @relation(name: "PaymentSubscriptionCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+    creator               Profile             @relation(name: "PaymentSubscriptionCreator", fields: [creatorId], references: [id], onDelete: Restrict)
     creatorId             BigInt
     paymentSubscription   PaymentSubscription @relation(fields: [paymentSubscriptionId], references: [id])
     paymentSubscriptionId BigInt
@@ -534,9 +534,9 @@ model PaymentSubscriptionTransaction {
 
 model PaidPostTransaction {
     id               BigInt            @id
-    user             User              @relation(name: "PaidPostTransactionUser", fields: [userId], references: [id], onDelete: Cascade)
+    user             User              @relation(name: "PaidPostTransactionUser", fields: [userId], references: [id], onDelete: Restrict)
     userId           BigInt
-    creator          Profile           @relation(name: "PaidPostTransactionCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+    creator          Profile           @relation(name: "PaidPostTransactionCreator", fields: [creatorId], references: [id], onDelete: Restrict)
     creatorId        BigInt
     paymentMethod    PaymentMethod?    @relation(fields: [paymentMethodId], references: [id])
     paymentMethodId  BigInt?
@@ -569,9 +569,9 @@ model PaidPostTransaction {
 
 model CameoPayment {
     id               BigInt            @id
-    user             User              @relation(name: "CameoPaymentUser", fields: [userId], references: [id], onDelete: Cascade)
+    user             User              @relation(name: "CameoPaymentUser", fields: [userId], references: [id], onDelete: Restrict)
     userId           BigInt
-    creator          Profile           @relation(name: "CameoPaymentCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+    creator          Profile           @relation(name: "CameoPaymentCreator", fields: [creatorId], references: [id], onDelete: Restrict)
     creatorId        BigInt
     paymentMethod    PaymentMethod?    @relation(fields: [paymentMethodId], references: [id])
     paymentMethodId  BigInt?
@@ -653,9 +653,6 @@ model Profile {
     isDisplayShop         Boolean          @default(true)
     isAllowedScreenshot   Boolean?
     isDisplayReview       Boolean          @default(true)
-
-    unusedAgeVerifyId     String?          @map("ageVerifyId")
-    unusedAgeVerifyStatus AgeVerifyStatus? @map("ageVerifyStatus")
 
     socialLinks                         SocialLink[]
     subscriptions                       Subscription[]
@@ -751,9 +748,9 @@ model CreatorReferral {
 
 model CreatorReferralTransaction {
     id            BigInt                         @id
-    referent      Profile                        @relation(name: "ReferentCreatorReferralTransaction", fields: [referentId], references: [id], onDelete: Cascade)
+    referent      Profile                        @relation(name: "ReferentCreatorReferralTransaction", fields: [referentId], references: [id], onDelete: Restrict)
     referentId    BigInt
-    referrer      Profile                        @relation(name: "ReferrerCreatorReferralTransaction", fields: [referrerId], references: [id], onDelete: Cascade)
+    referrer      Profile                        @relation(name: "ReferrerCreatorReferralTransaction", fields: [referrerId], references: [id], onDelete: Restrict)
     referrerId    BigInt
     type          CreatorReferralTransactionType
     transactionId BigInt
@@ -792,13 +789,13 @@ model FanReferral {
 
 model FanReferralTransaction {
     id            BigInt                     @id
-    referent      User                       @relation(name: "ReferentFanReferralTransaction", fields: [referentId], references: [id], onDelete: Cascade)
+    referent      User                       @relation(name: "ReferentFanReferralTransaction", fields: [referentId], references: [id], onDelete: Restrict)
     referentId    BigInt
-    creator       Profile                    @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+    creator       Profile                    @relation(fields: [creatorId], references: [id], onDelete: Restrict)
     creatorId     BigInt
-    fanReferral   FanReferral                @relation(fields: [fanReferralId], references: [id], onDelete: Cascade)
+    fanReferral   FanReferral                @relation(fields: [fanReferralId], references: [id], onDelete: Restrict)
     fanReferralId BigInt
-    referrer      User                       @relation(name: "ReferrerFanReferralTransaction", fields: [referrerId], references: [id], onDelete: Cascade)
+    referrer      User                       @relation(name: "ReferrerFanReferralTransaction", fields: [referrerId], references: [id], onDelete: Restrict)
     referrerId    BigInt
     type          FanReferralTransactionType
     transactionId BigInt
@@ -1157,7 +1154,7 @@ model Post {
     caption          String   @db.Text
     thumb            String?
     thumbId          BigInt?
-    thumbMedia       Upload?  @relation(fields: [thumbId], references: [id], onDelete: Cascade)
+    thumbMedia       Upload?  @relation(fields: [thumbId], references: [id], onDelete: SetNull)
     resource         Json // it can be array of images, array of videos, text
     text             String?
     advanced         Json?
@@ -1262,8 +1259,7 @@ model RolePaidPost {
     roleId     BigInt
     paidPost   PaidPost @relation(fields: [paidPostId], references: [id], onDelete: Cascade)
     paidPostId BigInt
-	updatedAt  DateTime @updatedAt
-
+    updatedAt  DateTime @updatedAt
 
     @@index([roleId], type: BTree)
     @@index([paidPostId], type: BTree)
@@ -1277,7 +1273,7 @@ model TierPaidPost {
     tierId     BigInt
     paidPost   PaidPost @relation(fields: [paidPostId], references: [id], onDelete: Cascade)
     paidPostId BigInt
-	updatedAt  DateTime @updatedAt
+    updatedAt  DateTime @updatedAt
 
     @@index([tierId], type: BTree)
     @@index([paidPostId], type: BTree)
@@ -1291,7 +1287,7 @@ model UserPaidPost {
     userId     BigInt
     paidPost   PaidPost @relation(fields: [paidPostId], references: [id], onDelete: Cascade)
     paidPostId BigInt
-	updatedAt  DateTime @updatedAt
+    updatedAt  DateTime @updatedAt
 
     @@index([userId], type: BTree)
     @@index([paidPostId], type: BTree)
@@ -1305,7 +1301,7 @@ model Fundraiser {
     caption    String?  @db.Text
     thumb      String?
     thumbId    BigInt?
-    thumbMedia Upload?  @relation(fields: [thumbId], references: [id], onDelete: Cascade)
+    thumbMedia Upload?  @relation(fields: [thumbId], references: [id], onDelete: SetNull)
     price      Float
     currency   String
     endDate    DateTime
@@ -1331,7 +1327,7 @@ model Giveaway {
     prize       String
     thumb       String?
     thumbId     BigInt?
-    thumbMedia  Upload?  @relation(fields: [thumbId], references: [id], onDelete: Cascade)
+    thumbMedia  Upload?  @relation(fields: [thumbId], references: [id], onDelete: SetNull)
     endDate     DateTime
     winnerCount Int
     post        Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
@@ -1356,7 +1352,7 @@ model Poll {
     caption    String?
     thumb      String?
     thumbId    BigInt?
-    thumbMedia Upload?  @relation(fields: [thumbId], references: [id], onDelete: Cascade)
+    thumbMedia Upload?  @relation(fields: [thumbId], references: [id], onDelete: SetNull)
     endDate    DateTime
     post       Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
     postId     BigInt   @unique
@@ -1565,7 +1561,7 @@ model Playlist {
     description String?
     thumb       String
     thumbId     BigInt?
-    thumbMedia  Upload?  @relation(fields: [thumbId], references: [id], onDelete: Cascade)
+    thumbMedia  Upload?  @relation(fields: [thumbId], references: [id], onDelete: SetNull)
     isPrivate   Boolean  @default(false)
     viewCount   Int      @default(0)
     updatedAt   DateTime @updatedAt
@@ -1832,7 +1828,7 @@ model Message {
     previewUploads          Upload[]                  @relation("MessagePreviewUploads")
     chatPaidPostTransaction ChatPaidPostTransaction[]
     messageReports          MessageReport[]
-    Upload                  Upload?                   @relation(fields: [uploadId], references: [id])
+    Upload                  Upload?                   @relation(fields: [uploadId], references: [id], onDelete: SetNull)
     uploadId                BigInt?
 
     @@index([channelId], type: BTree)
@@ -2051,7 +2047,7 @@ model UserReport {
     flag      ProfileReportFlag
     status    ReportStatus      @default(OPEN)
     reason    String?
-    thumb     Upload?           @relation(fields: [thumbId], references: [id], onDelete: Cascade)
+    thumb     Upload?           @relation(fields: [thumbId], references: [id], onDelete: SetNull)
     thumbId   BigInt?
     updatedAt DateTime          @updatedAt
 
@@ -2261,13 +2257,15 @@ model ChatNote {
 }
 
 model WelcomeMessage {
-    id        BigInt   @id
-    profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
-    profileId BigInt
-    enabled   Boolean  @default(false)
-    text      String?
-    image     String?
-    updatedAt DateTime @updatedAt
+    id             BigInt   @id
+    profile        Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+    profileId      BigInt
+    enabled        Boolean  @default(false)
+    text           String?
+    image          BigInt?
+    isDelayEnabled Boolean  @default(false)
+    delay          Int      @default(0)
+    updatedAt      DateTime @updatedAt
 
     @@index([profileId], type: BTree)
     @@index([updatedAt], type: BTree)

@@ -42,6 +42,7 @@ import {
 	CreateMessageReportReqBody,
 	MediasRespBody,
 	PurchaseChatPaidPostReqBody,
+	UpdateChatAutomatedMessageWelcomeReqBody,
 } from "./schemas.js";
 import {
 	ChannelMediaPageQueryValidator,
@@ -56,6 +57,7 @@ import {
 	ChatUserIdParamsValidator,
 	CreateMessageReportReqBodyValidator,
 	PurchaseChatPaidPostReqBodyValidator,
+	UpdateChatAutomatedMessageWelcomeReqBodyValidator,
 } from "./validation.js";
 import AuthorizeNetService from "../../../common/service/AuthorizeNetService.js";
 import FeesCalculator from "../../../common/service/FeesCalculatorService.js";
@@ -256,6 +258,8 @@ export default async function routes(fastify: FastifyTypebox) {
 		MessageType.MEDIA,
 		MessageType.GIF,
 		MessageType.PAID_POST,
+		MessageType.VIDEO_CALL_NOTIFICATION,
+		MessageType.TOP_FAN_NOTIFICATION,
 	];
 
 	// Sends a message to a conversation
@@ -845,6 +849,8 @@ export default async function routes(fastify: FastifyTypebox) {
 					text: true,
 					image: true,
 					enabled: true,
+					isDelayEnabled: true,
+					delay: true,
 				},
 			});
 
@@ -872,7 +878,8 @@ export default async function routes(fastify: FastifyTypebox) {
 				return reply.sendError(APIErrors.PROFILE_NOT_FOUND);
 			}
 
-			const { text, image, enabled } = request.body;
+			const { text, image, enabled, isDelayEnabled, delay } =
+				request.body;
 
 			const welcomeMessage = await prisma.welcomeMessage.findFirst({
 				where: {
@@ -880,28 +887,79 @@ export default async function routes(fastify: FastifyTypebox) {
 				},
 			});
 
-			if (welcomeMessage) {
-				await prisma.welcomeMessage.update({
-					where: {
-						id: welcomeMessage.id,
-					},
-					data: {
-						text,
-						image,
-						enabled,
-					},
-				});
-			} else {
-				await prisma.welcomeMessage.create({
-					data: {
-						id: snowflake.gen(),
-						profileId: profile.id,
-						text,
-						image,
-						enabled,
-					},
-				});
+			await prisma.welcomeMessage.upsert({
+				where: {
+					id: welcomeMessage?.id ?? snowflake.gen(),
+					profileId: profile.id,
+				},
+				create: {
+					id: snowflake.gen(),
+					profileId: profile.id,
+					text,
+					image: image ? BigInt(image) : null,
+					enabled,
+					isDelayEnabled,
+					delay,
+				},
+				update: {
+					text,
+					image: image ? BigInt(image) : null,
+					enabled,
+					isDelayEnabled,
+					delay,
+				},
+			});
+
+			reply.status(200).send(welcomeMessage);
+		},
+	);
+
+	fastify.put<{ Body: UpdateChatAutomatedMessageWelcomeReqBody }>(
+		"/automated-messages/welcome/settings",
+		{
+			schema: {
+				body: UpdateChatAutomatedMessageWelcomeReqBodyValidator,
+			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+				sessionManager.requireProfileHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session!;
+
+			const profile = await session.getProfile(prisma);
+			if (!profile) {
+				return reply.sendError(APIErrors.PROFILE_NOT_FOUND);
 			}
+
+			const { enabled, isDelayEnabled, delay } = request.body;
+
+			const welcomeMessage = await prisma.welcomeMessage.findFirst({
+				where: {
+					profileId: profile.id,
+				},
+			});
+
+			await prisma.welcomeMessage.upsert({
+				where: {
+					id: welcomeMessage?.id ?? snowflake.gen(),
+					profileId: profile.id,
+				},
+				create: {
+					id: snowflake.gen(),
+					profileId: profile.id,
+					enabled,
+					isDelayEnabled,
+					delay,
+				},
+				update: {
+					enabled,
+					isDelayEnabled,
+					delay,
+				},
+			});
 
 			reply.status(201).send();
 		},
@@ -1340,7 +1398,7 @@ export default async function routes(fastify: FastifyTypebox) {
 			}
 
 			const creator = await prisma.profile.findUnique({
-				where: { userId: message.userId },
+				where: { userId: message.userId, disabled: false },
 			});
 
 			if (!creator) {

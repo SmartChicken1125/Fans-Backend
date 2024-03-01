@@ -437,6 +437,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				where: {
 					referrerCode: code,
 					referrer: { profileId: profile.id },
+					disabled: false,
 				},
 				include: {
 					paymentSubscriptions: {

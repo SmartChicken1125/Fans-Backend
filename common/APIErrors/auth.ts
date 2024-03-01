@@ -151,4 +151,11 @@ export const authAPIErrors = {
 			message: "The password reset code is invalid or has expired",
 		},
 	},
+	EMAIL_VERIFICATION_ALREADY_VERIFIED: {
+		status: 400,
+		data: {
+			code: errorCode(ErrorSource.Auth, 22),
+			message: "This email has already been verified.",
+		},
+	},
 };

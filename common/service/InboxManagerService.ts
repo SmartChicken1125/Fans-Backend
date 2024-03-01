@@ -312,6 +312,15 @@ class InboxManagerService {
 				},
 			});
 
+			const profile = await this.#prisma.profile.findFirst({
+				where: {
+					userId: inbox.userId,
+				},
+				select: {
+					id: true,
+				},
+			});
+
 			const subscription =
 				await this.#prisma.paymentSubscription.findFirst({
 					where: {
@@ -322,9 +331,8 @@ class InboxManagerService {
 								status: SubscriptionStatus.Active,
 							},
 							{
-								userId: otherParticipant?.user.profile?.id,
-								creatorId: inbox.userId,
-								status: SubscriptionStatus.Active,
+								userId: otherParticipant?.user.id,
+								creatorId: profile?.id,
 							},
 						],
 					},

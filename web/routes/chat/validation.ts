@@ -16,6 +16,7 @@ import {
 	CreateMessageReportReqBody,
 	PurchaseChatPaidPostReqBody,
 	ChatPaidPostPriceReqQuery,
+	UpdateChatAutomatedMessageWelcomeReqBody,
 } from "./schemas.js";
 
 export const ChatPaginatedQueryValidator = Type.Object({
@@ -75,7 +76,7 @@ export const ChatConversationMessagesPostReqBodyValidator = Type.Object({
 	messageType: Type.Optional(
 		Type.Number({
 			minimum: 0,
-			maximum: 3,
+			maximum: 6,
 			default: 0,
 		}),
 	),
@@ -127,12 +128,27 @@ export const ChatAutomatedMessageWelcomeReqBodyValidator = Type.Object({
 	}),
 	image: Type.Optional(Type.String()),
 	enabled: Type.Boolean(),
+	isDelayEnabled: Type.Boolean(),
+	delay: Type.Number(),
 });
 
 assert<
 	Equals<
 		Static<typeof ChatAutomatedMessageWelcomeReqBodyValidator>,
 		ChatAutomatedMessageWelcomeReqBody
+	>
+>();
+
+export const UpdateChatAutomatedMessageWelcomeReqBodyValidator = Type.Object({
+	enabled: Type.Boolean(),
+	isDelayEnabled: Type.Boolean(),
+	delay: Type.Number(),
+});
+
+assert<
+	Equals<
+		Static<typeof UpdateChatAutomatedMessageWelcomeReqBodyValidator>,
+		UpdateChatAutomatedMessageWelcomeReqBody
 	>
 >();
 

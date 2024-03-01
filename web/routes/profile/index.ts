@@ -448,7 +448,7 @@ export default async function routes(fastify: FastifyTypebox) {
 			);
 
 			const profile = await prisma.profile.findFirst({
-				where: { userId: BigInt(userId) },
+				where: { userId: BigInt(userId), disabled: false },
 				include: {
 					socialLinks: true,
 					categories: true,
@@ -857,6 +857,7 @@ export default async function routes(fastify: FastifyTypebox) {
 							mode: "insensitive",
 						},
 					},
+					disabled: false,
 				},
 				include: {
 					socialLinks: true,
@@ -1432,6 +1433,7 @@ export default async function routes(fastify: FastifyTypebox) {
 					marketingContentLink: data.marketingContentLink,
 					referrerCode: referrer ? data.referrerCode : undefined,
 					notificationsSettings: { create: { id: snowflake.gen() } },
+					welcomeMessage: { create: { id: snowflake.gen() } },
 				},
 				include: { user: true },
 			});
@@ -1963,7 +1965,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				return reply.sendError(APIErrors.CANNOT_PERFORM_ACTION_ON_SELF);
 			}
 			const profile = await prisma.profile.findFirst({
-				where: { id: BigInt(profileId) },
+				where: { id: BigInt(profileId), disabled: false },
 			});
 			if (!profile) {
 				return reply.sendError(APIErrors.ITEM_NOT_FOUND("Profile"));

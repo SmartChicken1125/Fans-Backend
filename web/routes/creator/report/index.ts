@@ -42,32 +42,29 @@ export default async function routes(fastify: FastifyTypebox) {
 			const { page = 1, size = DEFAULT_PAGE_SIZE } = request.query;
 			const session = request.session!;
 			const profile = (await session.getProfile(prisma))!;
-			try {
-				const total = await prisma.userReport.count({
-					where: { creatorId: profile.id },
-				});
-				if (isOutOfRange(page, size, total)) {
-					return reply.sendError(APIErrors.OUT_OF_RANGE);
-				}
-				const UserReports = await prisma.userReport.findMany({
-					where: { creatorId: profile.id },
-					include: { user: true, thumb: true },
-					skip: (page - 1) * size,
-					take: size,
-				});
-				const result: UserReportsRespBody = {
-					reports: UserReports.map((r) => ({
-						...ModelConverter.toIUserReport(r),
-						user: ModelConverter.toIUser(r.user),
-					})),
-					page,
-					size,
-					total,
-				};
-				return reply.send(result);
-			} catch (err) {
-				return reply.sendError(APIErrors.GENERIC_ERROR);
+
+			const total = await prisma.userReport.count({
+				where: { creatorId: profile.id },
+			});
+			if (isOutOfRange(page, size, total)) {
+				return reply.sendError(APIErrors.OUT_OF_RANGE);
 			}
+			const UserReports = await prisma.userReport.findMany({
+				where: { creatorId: profile.id },
+				include: { user: true, thumb: true },
+				skip: (page - 1) * size,
+				take: size,
+			});
+			const result: UserReportsRespBody = {
+				reports: UserReports.map((r) => ({
+					...ModelConverter.toIUserReport(r),
+					user: ModelConverter.toIUser(r.user),
+				})),
+				page,
+				size,
+				total,
+			};
+			return reply.send(result);
 		},
 	);
 
@@ -83,27 +80,21 @@ export default async function routes(fastify: FastifyTypebox) {
 			],
 		},
 		async (request, reply) => {
-			try {
-				const session = request.session!;
-				const profile = (await session.getProfile(prisma))!;
-				const { id } = request.params;
-				const userReport = await prisma.userReport.findFirst({
-					where: { id: BigInt(id), creatorId: profile.id },
-					include: { user: true, thumb: true },
-				});
-				if (!userReport)
-					return reply.sendError(
-						APIErrors.ITEM_NOT_FOUND("UserReport"),
-					);
+			const session = request.session!;
+			const profile = (await session.getProfile(prisma))!;
+			const { id } = request.params;
+			const userReport = await prisma.userReport.findFirst({
+				where: { id: BigInt(id), creatorId: profile.id },
+				include: { user: true, thumb: true },
+			});
+			if (!userReport)
+				return reply.sendError(APIErrors.ITEM_NOT_FOUND("UserReport"));
 
-				const result: UserReportRespBody = {
-					...ModelConverter.toIUserReport(userReport),
-					user: ModelConverter.toIUser(userReport.user),
-				};
-				return reply.send(result);
-			} catch (err) {
-				return reply.sendError(APIErrors.GENERIC_ERROR);
-			}
+			const result: UserReportRespBody = {
+				...ModelConverter.toIUserReport(userReport),
+				user: ModelConverter.toIUser(userReport.user),
+			};
+			return reply.send(result);
 		},
 	);
 
@@ -122,33 +113,25 @@ export default async function routes(fastify: FastifyTypebox) {
 			],
 		},
 		async (request, reply) => {
-			try {
-				const session = request.session!;
-				const profile = (await session.getProfile(prisma))!;
-				const { id } = request.params;
-				const { status } = request.body;
-				const userReport = await prisma.userReport.findFirst({
-					where: { id: BigInt(id), creatorId: profile.id },
-					include: { user: true, thumb: true },
-				});
-				if (!userReport) {
-					return reply.sendError(
-						APIErrors.ITEM_NOT_FOUND("UserReport"),
-					);
-				}
-				if (status === "ACCEPTED") {
-					// Todo: perform to remove post / ban user etc
-				}
-				await prisma.userReport.update({
-					where: { id: BigInt(id) },
-					data: { status },
-				});
-				return reply
-					.status(202)
-					.send({ message: "User Report is updated!" });
-			} catch (err) {
-				return reply.sendError(APIErrors.GENERIC_ERROR);
+			const session = request.session!;
+			const profile = (await session.getProfile(prisma))!;
+			const { id } = request.params;
+			const { status } = request.body;
+			const userReport = await prisma.userReport.findFirst({
+				where: { id: BigInt(id), creatorId: profile.id },
+				include: { user: true, thumb: true },
+			});
+			if (!userReport) {
+				return reply.sendError(APIErrors.ITEM_NOT_FOUND("UserReport"));
 			}
+			if (status === "ACCEPTED") {
+				// Todo: perform to remove post / ban user etc
+			}
+			await prisma.userReport.update({
+				where: { id: BigInt(id) },
+				data: { status },
+			});
+			return reply.status(202).send();
 		},
 	);
 
@@ -166,36 +149,30 @@ export default async function routes(fastify: FastifyTypebox) {
 			],
 		},
 		async (request, reply) => {
-			try {
-				const session = request.session!;
-				const profile = (await session.getProfile(prisma))!;
-				const data = request.body;
+			const session = request.session!;
+			const profile = (await session.getProfile(prisma))!;
+			const data = request.body;
 
-				const userReportCount = await prisma.userReport.count({
-					where: { creatorId: profile.id },
-				});
+			const userReportCount = await prisma.userReport.count({
+				where: { creatorId: profile.id },
+			});
 
-				if (userReportCount >= maxObjectLimit) {
-					return reply.sendError(APIErrors.REACHED_MAX_OBJECT_LIMIT);
-				}
-
-				await prisma.userReport.create({
-					data: {
-						id: snowflake.gen(),
-						creatorId: profile.id,
-						flag: data.flag,
-						userId: BigInt(data.userId),
-						reason: data.reason,
-						thumbId: data.thumbId
-							? BigInt(data.thumbId)
-							: undefined,
-					},
-				});
-
-				return reply.status(201).send({ success: true });
-			} catch (err) {
-				return reply.sendError(APIErrors.GENERIC_ERROR);
+			if (userReportCount >= maxObjectLimit) {
+				return reply.sendError(APIErrors.REACHED_MAX_OBJECT_LIMIT);
 			}
+
+			await prisma.userReport.create({
+				data: {
+					id: snowflake.gen(),
+					creatorId: profile.id,
+					flag: data.flag,
+					userId: BigInt(data.userId),
+					reason: data.reason,
+					thumbId: data.thumbId ? BigInt(data.thumbId) : undefined,
+				},
+			});
+
+			return reply.status(201).send({ success: true });
 		},
 	);
 }

@@ -77,7 +77,7 @@ export default async function routes(fastify: FastifyTypebox) {
 			const session = request.session!;
 			const { profileId, code } = request.body;
 			const profile = await prisma.profile.findFirst({
-				where: { id: BigInt(profileId) },
+				where: { id: BigInt(profileId), disabled: false },
 			});
 			if (!profile) {
 				return reply.sendError(APIErrors.ITEM_NOT_FOUND("Profile"));

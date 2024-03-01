@@ -34,7 +34,6 @@ import {
 	AuthOAuth2LinkRespBody,
 	AuthPasswordLoginReqBody,
 	AuthPasswordRegisterReqBody,
-	AuthPasswordVerifyRegisterReqBody,
 	AuthResendReqBody,
 	AuthResetPasswordReqBody,
 	AuthUserInfoRespBody,
@@ -51,7 +50,6 @@ import {
 	AuthOAuth2LinkReqParamsValidator,
 	AuthPasswordLoginReqBodyValidator,
 	AuthPasswordRegisterReqBodyValidator,
-	AuthPasswordVerifyRegisterReqBodyValidator,
 	AuthResendReqBodyValidator,
 	AuthResetPasswordReqBodyValidator,
 	AuthVerifyCodeReqBodyValidator,
@@ -61,8 +59,6 @@ import RedisService from "../../../common/service/RedisService.js";
 import { genOTP } from "../../../common/utils/OTPGenerator.js";
 import { User } from "@prisma/client";
 import { ISession } from "../../CommonAPISchemas.js";
-import { IdParams } from "../../../common/validators/schemas.js";
-import { IdParamsValidator } from "../../../common/validators/validation.js";
 
 const DECIMAL_TO_CENT_FACTOR = 100;
 
@@ -137,7 +133,7 @@ export default async function routes(
 		});
 	};
 
-	fastify.post<{ Body: AuthPasswordRegisterReqBody }>(
+	fastify.post<{ Body: AuthPasswordRegisterReqBody; Reply: TokenRespBody }>(
 		"/register",
 		{
 			config: {
@@ -151,7 +147,7 @@ export default async function routes(
 				return reply.sendError(APIErrors.ALREADY_AUTHORIZED);
 			}
 
-			const { email, username } = request.body;
+			const { email, username, password } = request.body;
 			if (username != undefined && !isUsernameValid(username)) {
 				return reply.sendError(APIErrors.REGISTER_INVALID_USERNAME);
 			}
@@ -184,8 +180,32 @@ export default async function routes(
 				);
 			}
 
+			const strengthCheck = validatePassword(password);
+			if (!strengthCheck.success) {
+				return reply.sendError(
+					APIErrors.REGISTER_INVALID_PASSWORD(strengthCheck.message),
+				);
+			}
+
 			await prisma.oTPCode.deleteMany({
 				where: { email },
+			});
+
+			const passwordHash = await generatePasswordHashSalt(password);
+			const user = await prisma.user.create({
+				data: {
+					id: snowflake.gen(),
+					email: lowerCaseEmail,
+					displayName: "",
+					username,
+					password: passwordHash,
+					gems: { create: { id: snowflake.gen() } },
+					popupStatus: { create: { id: snowflake.gen() } },
+					notificationsSettings: {
+						create: { id: snowflake.gen() },
+					},
+					verifiedAt: null,
+				},
 			});
 
 			const otpCode = await prisma.oTPCode.create({
@@ -193,10 +213,10 @@ export default async function routes(
 					id: snowflake.gen(),
 					code: genOTP(6),
 					email: email,
+					userId: user.id,
 				},
 			});
 
-			// todo: Send verification email to user
 			const emailData: SendEmailData = {
 				sender: process.env.SENDINBLUE_SENDER || "noreply@fyp.fans",
 				to: [lowerCaseEmail],
@@ -205,107 +225,8 @@ export default async function routes(
 			};
 			await emailService.sendEmail(emailData);
 
-			return reply.status(202).send();
-		},
-	);
-
-	fastify.post<{ Body: AuthPasswordVerifyRegisterReqBody }>(
-		"/verify-register",
-		{
-			config: {
-				rateLimit: {},
-			},
-			schema: { body: AuthPasswordVerifyRegisterReqBodyValidator },
-			preHandler: [sessionManager.sessionPreHandler],
-		},
-		async (request, reply) => {
-			if (request.session) {
-				return reply.sendError(APIErrors.ALREADY_AUTHORIZED);
-			}
-
-			const { code, email, username, password } = request.body;
-			if (username != undefined && !isUsernameValid(username)) {
-				return reply.sendError(APIErrors.REGISTER_INVALID_USERNAME);
-			}
-
-			const lowerCaseEmail = email.toLowerCase();
-
-			if (!isEmailValid(lowerCaseEmail)) {
-				return reply.sendError(APIErrors.REGISTER_INVALID_EMAIL);
-			}
-
-			const strengthCheck = validatePassword(password);
-
-			if (!strengthCheck.success) {
-				return reply.sendError(
-					APIErrors.REGISTER_INVALID_PASSWORD(strengthCheck.message),
-				);
-			}
-
-			const existingUser = await prisma.user.findFirst({
-				where: {
-					OR: [
-						{
-							email: {
-								equals: lowerCaseEmail,
-								mode: "insensitive",
-							},
-						},
-						{ username: { equals: username, mode: "insensitive" } },
-					],
-				},
-			});
-
-			if (existingUser) {
-				return reply.sendError(
-					existingUser.email === lowerCaseEmail
-						? APIErrors.REGISTER_EMAIL_IN_USE
-						: APIErrors.TAKEN_USERNAME,
-				);
-			}
-
-			const passwordHash = await generatePasswordHashSalt(password);
-			const otpCode = await prisma.oTPCode.findFirst({
-				where: {
-					email,
-					code,
-				},
-			});
-
-			if (!otpCode) {
-				return reply.sendError(APIErrors.ITEM_NOT_FOUND("OTP"));
-			}
-
-			const [_, created] = await Promise.all([
-				prisma.oTPCode.delete({
-					where: { id: otpCode.id },
-				}),
-				prisma.user.create({
-					data: {
-						id: snowflake.gen(),
-						email: lowerCaseEmail,
-						username,
-						displayName: "",
-						password: passwordHash,
-						verifiedAt: new Date(),
-						gems: { create: { id: snowflake.gen() } },
-						popupStatus: { create: { id: snowflake.gen() } },
-						notificationsSettings: {
-							create: { id: snowflake.gen() },
-						},
-					},
-				}),
-			]);
-
-			const session = await sessionManager.createSessionForUser(
-				created.id.toString(),
-				request,
-			);
-			const result: TokenRespBody = {
-				token: session.createToken(),
-			};
 			await siftService.createAccount({
-				$user_id: created.id.toString(),
+				$user_id: user.id.toString(),
 				$user_email: request.body.email,
 				$ip: request.ip,
 				$browser: {
@@ -313,6 +234,15 @@ export default async function routes(
 					$accept_language: request.headers["accept-language"],
 				},
 			});
+
+			const session = await sessionManager.createSessionForUser(
+				user.id.toString(),
+			);
+
+			const result: TokenRespBody = {
+				token: session.createToken(),
+			};
+
 			return reply.send(result);
 		},
 	);
@@ -353,11 +283,6 @@ export default async function routes(
 				return reply.sendError(APIErrors.USER_BANNED);
 			}
 
-			if (!user.verifiedAt) {
-				siftLogin(user, request, "$failure", "$account_suspended");
-				return reply.sendError(APIErrors.USER_NOT_VERIFIED);
-			}
-
 			const result = await verifyPassword(password, user.password);
 			if (result === VerifyPasswordResult.OK) {
 				const session = await sessionManager.createSessionForUser(
@@ -393,7 +318,7 @@ export default async function routes(
 		{
 			preHandler: [
 				sessionManager.sessionPreHandler,
-				sessionManager.requireAuthHandler,
+				sessionManager.requireAuthNoVerificationHandler,
 			],
 		},
 		async (request, reply) => {
@@ -417,7 +342,7 @@ export default async function routes(
 		{
 			preHandler: [
 				sessionManager.sessionPreHandler,
-				sessionManager.requireAuthHandler,
+				sessionManager.requireAuthNoVerificationHandler,
 			],
 		},
 		async (request, reply) => {
@@ -504,11 +429,6 @@ export default async function routes(
 				return reply.sendError(APIErrors.USER_BANNED);
 			}
 
-			if (!user.verifiedAt) {
-				siftLogin(user, request, "$failure", "$account_suspended");
-				return reply.sendError(APIErrors.USER_NOT_VERIFIED);
-			}
-
 			const code = crypto.randomBytes(128).toString("base64url");
 			await redis.set(
 				resetPasswordCodeKey(code),
@@ -582,11 +502,6 @@ export default async function routes(
 				return reply.sendError(APIErrors.USER_BANNED);
 			}
 
-			if (!user.verifiedAt) {
-				siftLogin(user, request, "$failure", "$account_suspended");
-				return reply.sendError(APIErrors.USER_NOT_VERIFIED);
-			}
-
 			const strengthCheck = validatePassword(password);
 			if (!strengthCheck.success) {
 				return reply.sendError(
@@ -599,7 +514,7 @@ export default async function routes(
 			const passwordHash = await generatePasswordHashSalt(password);
 			await prisma.user.update({
 				where: { id: user.id },
-				data: { password: passwordHash },
+				data: { password: passwordHash, verifiedAt: new Date() },
 			});
 
 			await sessionManager.destroySessionsForUser(user.id.toString());
@@ -615,69 +530,21 @@ export default async function routes(
 	);
 
 	fastify.post<{ Body: AuthVerifyCodeReqBody }>(
-		"/verify-code",
-		{
-			schema: {
-				body: AuthVerifyCodeReqBodyValidator,
-			},
-		},
-		async (request, reply) => {
-			const { code, email } = request.body;
-			const user = await prisma.user.findFirst({
-				where: {
-					email: {
-						equals: email,
-						mode: "insensitive",
-					},
-				},
-			});
-			if (!user) {
-				return reply.sendError(APIErrors.USER_NOT_FOUND);
-			}
-
-			if (user.disabled) {
-				siftLogin(user, request, "$failure", "$account_suspended");
-				return reply.sendError(APIErrors.USER_BANNED);
-			}
-
-			const otp = await prisma.oTPCode.findFirst({
-				where: { AND: [{ code }, { userId: { equals: user.id } }] },
-			});
-
-			if (!otp) {
-				return reply.sendError(
-					APIErrors.INVALID_REQUEST("Code is invalid!"),
-				);
-			}
-
-			const session = await sessionManager.createSessionForUser(
-				user.id.toString(),
-				request,
-			);
-
-			const result: TokenRespBody = { token: session.createToken() };
-			return reply.send(result);
-		},
-	);
-
-	fastify.post<{ Body: AuthVerifyCodeReqBody }>(
 		"/verify-account",
 		{
 			schema: {
 				body: AuthVerifyCodeReqBodyValidator,
 			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthNoVerificationHandler,
+			],
 		},
 		async (request, reply) => {
-			const { code, email } = request.body;
-			const user = await prisma.user.findFirst({
-				where: {
-					email: {
-						equals: email,
-						mode: "insensitive",
-					},
-				},
-			});
-			if (!user) return reply.sendError(APIErrors.USER_NOT_FOUND);
+			const session = request.session!;
+			const user = await session.getUser(prisma);
+
+			const { code } = request.body;
 
 			if (user.disabled) {
 				siftLogin(user, request, "$failure", "$account_suspended");
@@ -691,6 +558,9 @@ export default async function routes(
 			});
 			if (!otp) return reply.sendError(APIErrors.ITEM_NOT_FOUND("OTP"));
 
+			// All other tokens will become verified which might be dangerous
+			await session.destroyOtherSessions();
+
 			await Promise.all([
 				prisma.oTPCode.delete({
 					where: { id: otp.id },
@@ -701,14 +571,7 @@ export default async function routes(
 				}),
 			]);
 
-			const session = await sessionManager.createSessionForUser(
-				user.id.toString(),
-				request,
-			);
-			const result: TokenRespBody = {
-				token: session.createToken(),
-			};
-			return reply.send(result);
+			return reply.send();
 		},
 	);
 
@@ -718,76 +581,59 @@ export default async function routes(
 			schema: {
 				body: AuthResendReqBodyValidator,
 			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthNoVerificationHandler,
+			],
 		},
 		async (request, reply) => {
-			const { email, username } = request.body;
-			const user = await prisma.user.findFirst({
-				where: {
-					email: {
-						equals: email,
-						mode: "insensitive",
+			const session = request.session!;
+			const user = await session.getUser(prisma);
+
+			if (user.verifiedAt != null)
+				return reply.sendError(
+					APIErrors.EMAIL_VERIFICATION_ALREADY_VERIFIED,
+				);
+
+			const { email } = request.body || {};
+			const lowerCaseEmail = email?.toLowerCase();
+			const targetEmail = lowerCaseEmail ?? user.email;
+
+			if (targetEmail) {
+				const existingUserByEmail = await prisma.user.findFirst({
+					where: {
+						email: { equals: targetEmail, mode: "insensitive" },
+						id: { not: user.id },
 					},
+				});
+
+				if (existingUserByEmail)
+					return reply.sendError(APIErrors.REGISTER_EMAIL_IN_USE);
+			}
+
+			await prisma.oTPCode.deleteMany({
+				where: { userId: user.id },
+			});
+
+			const otpCode = await prisma.oTPCode.create({
+				data: {
+					id: snowflake.gen(),
+					code: genOTP(6),
+					email: targetEmail ?? null,
+					userId: user.id,
 				},
 			});
-			if (!user) {
-				if (!username) {
-					return reply.sendError(APIErrors.USER_NOT_FOUND);
-				} else {
-					await prisma.oTPCode.deleteMany({
-						where: { email },
-					});
-					// create new otp code
-					const otpCode = await prisma.oTPCode.create({
-						data: {
-							id: snowflake.gen(),
-							code: genOTP(6),
-							email,
-						},
-					});
 
-					// todo: Send verification email to user
-					const emailData: SendEmailData = {
-						sender:
-							process.env.SENDINBLUE_SENDER || "noreply@fyp.fans",
-						to: [email.toLowerCase()],
-						htmlContent: RegisterEmailContent(otpCode.code),
-						subject: "Verify your account!",
-					};
-					await emailService.sendEmail(emailData);
-				}
-			} else {
-				if (user.disabled) {
-					siftLogin(user, request, "$failure", "$account_suspended");
-					return reply.sendError(APIErrors.USER_BANNED);
-				}
+			// send email for OTP code
+			const emailData: SendEmailData = {
+				sender: process.env.SENDINBLUE_SENDER || "support@fyp.fans",
+				to: [targetEmail],
+				htmlContent: RegisterEmailContent(otpCode.code),
+				subject: "Verify your account",
+			};
+			await emailService.sendEmail(emailData);
 
-				if (user.verifiedAt)
-					return reply.sendError(
-						APIErrors.INVALID_REQUEST(
-							"User is already verified, if you forgot password, you can request reset password!",
-						),
-					);
-				// delete otp if already exist for users
-				await prisma.oTPCode.deleteMany({
-					where: { userId: user.id },
-				});
-				// create new otp code
-				const otpCode = await prisma.oTPCode.create({
-					data: {
-						id: snowflake.gen(),
-						code: genOTP(6),
-						userId: user.id,
-					},
-				});
-				const emailData: SendEmailData = {
-					sender: process.env.SENDINBLUE_SENDER || "noreply@fyp.fans",
-					to: [email],
-					htmlContent: RegisterEmailContent(otpCode.code),
-					subject: "Verify your account!",
-				};
-				await emailService.sendEmail(emailData);
-			}
-			return reply.status(202).send();
+			return reply.send();
 		},
 	);
 
@@ -932,7 +778,7 @@ export default async function routes(
 			},
 			preHandler: [
 				sessionManager.sessionPreHandler,
-				sessionManager.requireAuthHandler,
+				sessionManager.requireAuthNoVerificationHandler,
 			],
 		},
 		async (request, reply) => {
@@ -993,7 +839,7 @@ export default async function routes(
 			},
 			preHandler: [
 				sessionManager.sessionPreHandler,
-				sessionManager.requireAuthHandler,
+				sessionManager.requireAuthNoVerificationHandler,
 			],
 		},
 		async (request, reply) => {
@@ -1033,7 +879,7 @@ export default async function routes(
 		{
 			preHandler: [
 				sessionManager.sessionPreHandler,
-				sessionManager.requireAuthHandler,
+				sessionManager.requireAuthNoVerificationHandler,
 			],
 		},
 		async (request, reply) => {

@@ -221,7 +221,7 @@ export default async function routes(
 			}
 
 			const creator = await prisma.profile.findFirst({
-				where: { id: BigInt(creatorId) },
+				where: { id: BigInt(creatorId), disabled: false },
 				select: {
 					id: true,
 					userId: true,
@@ -550,7 +550,7 @@ export default async function routes(
 			const profile = await session.getProfile(prisma);
 
 			const creator = await prisma.profile.findFirst({
-				where: { id: BigInt(creatorId) },
+				where: { id: BigInt(creatorId), disabled: false },
 			});
 
 			if (!creator) return reply.sendError(APIErrors.PROFILE_NOT_FOUND);
