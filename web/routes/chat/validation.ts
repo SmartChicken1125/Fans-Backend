@@ -17,6 +17,8 @@ import {
 	PurchaseChatPaidPostReqBody,
 	ChatPaidPostPriceReqQuery,
 	UpdateChatAutomatedMessageWelcomeReqBody,
+	TopFanNotificationReqBody,
+	UpdateTopFanNotificationReqBody,
 } from "./schemas.js";
 
 export const ChatPaginatedQueryValidator = Type.Object({
@@ -149,6 +151,40 @@ assert<
 	Equals<
 		Static<typeof UpdateChatAutomatedMessageWelcomeReqBodyValidator>,
 		UpdateChatAutomatedMessageWelcomeReqBody
+	>
+>();
+
+export const TopFanNotificationReqBodyValidator = Type.Object({
+	text: Type.Optional(
+		Type.String({
+			maxLength: 1000,
+		}),
+	),
+	image: Type.Optional(Type.String()),
+	top1Enabled: Type.Boolean(),
+	top5Enabled: Type.Boolean(),
+	top10Enabled: Type.Boolean(),
+	customMessageEnabled: Type.Boolean(),
+});
+
+assert<
+	Equals<
+		Static<typeof TopFanNotificationReqBodyValidator>,
+		TopFanNotificationReqBody
+	>
+>();
+
+export const UpdateTopFanNotificationReqBodyValidator = Type.Object({
+	top1Enabled: Type.Boolean(),
+	top5Enabled: Type.Boolean(),
+	top10Enabled: Type.Boolean(),
+	customMessageEnabled: Type.Boolean(),
+});
+
+assert<
+	Equals<
+		Static<typeof UpdateTopFanNotificationReqBodyValidator>,
+		UpdateTopFanNotificationReqBody
 	>
 >();
 

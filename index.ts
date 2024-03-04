@@ -63,6 +63,9 @@ import StripeService, {
 import TaxJarService, {
 	taxJarFactory,
 } from "./common/service/TaxJarService.js";
+import TopFanNotificationService, {
+	topFanNotificationFactory,
+} from "./common/service/TopFanNotification.js";
 import { registerFormats } from "./common/validators/validation.js";
 
 import AiService from "./common/service/AiService.js";
@@ -196,6 +199,9 @@ container.bindClass(SessionManagerService).asSingleton();
 container.bindAsyncFactory(SnowflakeService, snowflakeFactory).asSingleton();
 container.bindAsyncFactory(StripeService, stripeFactory).asSingleton();
 container.bindAsyncFactory(TaxJarService, taxJarFactory).asSingleton();
+container
+	.bindAsyncFactory(TopFanNotificationService, topFanNotificationFactory)
+	.asSingleton();
 container.bindAsyncFactory(SiftService, siftFactory).asSingleton();
 container.bindAsyncFactory(ChimeService, chimeFactory).asSingleton();
 container.bindAsyncFactory(XPService, xpServiceFactory).asSingleton();

@@ -54,6 +54,7 @@ import {
 	ProfileUpdateReqBodyValidator,
 	SocialLinkReqBodyValidator,
 } from "./validation.js";
+import { roundDecimals } from "../../../common/utils/Common.js";
 
 export default async function routes(fastify: FastifyTypebox) {
 	const { container } = fastify;
@@ -307,7 +308,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				subscriptionCount,
 				review: {
 					total: review._count.score,
-					score: review._avg.score ?? 0,
+					score: roundDecimals(review._avg.score),
 				},
 			};
 			return reply.send(result);
@@ -1211,7 +1212,7 @@ export default async function routes(fastify: FastifyTypebox) {
 					isBlocked,
 					review: {
 						total: review._count.score,
-						score: review._avg.score ?? 0,
+						score: roundDecimals(review._avg.score),
 					},
 				};
 				return reply.send(result);
@@ -1315,7 +1316,7 @@ export default async function routes(fastify: FastifyTypebox) {
 					hasAccess,
 					review: {
 						total: review._count.score,
-						score: review._avg.score ?? 0,
+						score: roundDecimals(review._avg.score),
 					},
 				};
 				return reply.send(result);

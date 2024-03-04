@@ -59,3 +59,14 @@ export function randomAlphaNumCode(
 	}
 	return result;
 }
+
+export function roundDecimals(value: number | string | null, decimals = 2) {
+	if (decimals < 0) {
+		throw new Error("Decimal length must be greater than or equal to 0");
+	}
+
+	return (
+		Math.round((Number(value) + Number.EPSILON) * Math.pow(10, decimals)) /
+			Math.pow(10, decimals) || 0
+	);
+}

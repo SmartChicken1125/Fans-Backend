@@ -242,6 +242,9 @@ model User {
     customVideoOrders               CustomVideoOrder[]
     Review                          Review[]
     videoCalls                      VideoCallParticipant[]
+    top1Fans                        Top1Fan[]
+    top5Fans                        Top5Fan[]
+    top10Fans                       Top10Fan[]
 
     @@index([username], type: BTree)
     @@index([displayName], type: BTree)
@@ -704,6 +707,10 @@ model Profile {
     Review                              Review[]
     meetingPreviewUploads               MeetingPreviewUpload[]
     customVideoPreviewUploads           CustomVideoPreviewUpload[]
+    topFanNotification                  TopFanNotification[]
+    top1Fans                            Top1Fan[]
+    top5Fans                            Top5Fan[]
+    top10Fans                           Top10Fan[]
 
     @@index([userId], type: BTree)
     @@index([displayName], type: BTree)
@@ -2270,6 +2277,69 @@ model WelcomeMessage {
     @@index([profileId], type: BTree)
     @@index([updatedAt], type: BTree)
     @@map("welcome_messages")
+}
+
+model TopFanNotification {
+    id                   BigInt   @id
+    profile              Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+    profileId            BigInt
+    top1Enabled          Boolean  @default(true)
+    top5Enabled          Boolean  @default(true)
+    top10Enabled         Boolean  @default(true)
+    customMessageEnabled Boolean  @default(false)
+    text                 String?
+    image                BigInt?
+    updatedAt            DateTime @updatedAt
+
+    top1Fans  Top1Fan[]  @relation("Top1FanNotification")
+    top5Fans  Top5Fan[]  @relation("Top5FanNotification")
+    top10Fans Top10Fan[] @relation("Top10FanNotification")
+
+    @@index([profileId], type: BTree)
+    @@index([updatedAt], type: BTree)
+    @@map("top_fan_notifications")
+}
+
+model Top1Fan {
+    id                   BigInt              @id
+    user                 User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+    userId               BigInt
+    creator              Profile             @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+    creatorId            BigInt
+    topFanNotification   TopFanNotification? @relation("Top1FanNotification", fields: [topFanNotificationId], references: [id])
+    topFanNotificationId BigInt?
+
+    @@index([userId], type: BTree)
+    @@index([creatorId], type: BTree)
+    @@map("top1_fans")
+}
+
+model Top5Fan {
+    id                   BigInt              @id
+    user                 User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+    userId               BigInt
+    creator              Profile             @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+    creatorId            BigInt
+    topFanNotification   TopFanNotification? @relation("Top5FanNotification", fields: [topFanNotificationId], references: [id])
+    topFanNotificationId BigInt?
+
+    @@index([userId], type: BTree)
+    @@index([creatorId], type: BTree)
+    @@map("top5_fans")
+}
+
+model Top10Fan {
+    id                   BigInt              @id
+    user                 User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+    userId               BigInt
+    creator              Profile             @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+    creatorId            BigInt
+    topFanNotification   TopFanNotification? @relation("Top10FanNotification", fields: [topFanNotificationId], references: [id])
+    topFanNotificationId BigInt?
+
+    @@index([userId], type: BTree)
+    @@index([creatorId], type: BTree)
+    @@map("top10_fans")
 }
 
 model ChatPaidPostTransaction {

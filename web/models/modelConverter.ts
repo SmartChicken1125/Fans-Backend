@@ -1200,13 +1200,11 @@ export class ModelConverter {
 			createdAt: SnowflakeService.extractDate(message.id).toISOString(),
 			content: message.content,
 			messageType: message.messageType,
-			media:
-				message.uploads &&
-				message.status === TransactionStatus.Successful
-					? message.uploads.map((u) =>
-							ModelConverter.toIMedia(u, metadata),
-					  )
-					: undefined,
+			media: message.uploads
+				? message.uploads.map((u) =>
+						ModelConverter.toIMedia(u, metadata),
+				  )
+				: undefined,
 			previewMedia: message.previewUploads
 				? message.previewUploads.map((u) =>
 						ModelConverter.toIMedia(u, metadata),
@@ -1242,11 +1240,17 @@ export class ModelConverter {
 			isSelf: false,
 		},
 	): IMessage {
-		const transformedMessage = ModelConverter.transformMessage(message);
+		const transformedMessage = ModelConverter.transformMessage(
+			message,
+			metadata,
+		);
 		return {
 			...transformedMessage,
 			parentMessage: message.parentMessage
-				? ModelConverter.transformMessage(message.parentMessage)
+				? ModelConverter.transformMessage(
+						message.parentMessage,
+						metadata,
+				  )
 				: undefined,
 		};
 	}

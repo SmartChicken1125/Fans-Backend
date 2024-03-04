@@ -42,7 +42,9 @@ import {
 	CreateMessageReportReqBody,
 	MediasRespBody,
 	PurchaseChatPaidPostReqBody,
+	TopFanNotificationReqBody,
 	UpdateChatAutomatedMessageWelcomeReqBody,
+	UpdateTopFanNotificationReqBody,
 } from "./schemas.js";
 import {
 	ChannelMediaPageQueryValidator,
@@ -57,7 +59,9 @@ import {
 	ChatUserIdParamsValidator,
 	CreateMessageReportReqBodyValidator,
 	PurchaseChatPaidPostReqBodyValidator,
+	TopFanNotificationReqBodyValidator,
 	UpdateChatAutomatedMessageWelcomeReqBodyValidator,
+	UpdateTopFanNotificationReqBodyValidator,
 } from "./validation.js";
 import AuthorizeNetService from "../../../common/service/AuthorizeNetService.js";
 import FeesCalculator from "../../../common/service/FeesCalculatorService.js";
@@ -241,8 +245,8 @@ export default async function routes(fastify: FastifyTypebox) {
 
 			const getMetadata = (m: MessageWithUser) => ({
 				isSelf: m.userId === user.id,
-				isPaidPost: false, // todo(alexandra)
-				isPaidFor: false,
+				isPaidPost: m.messageType === MessageType.PAID_POST,
+				isPaidFor: m.status === TransactionStatus.Successful,
 			});
 
 			reply.send({
@@ -821,6 +825,166 @@ export default async function routes(fastify: FastifyTypebox) {
 					},
 				});
 			}
+		},
+	);
+
+	fastify.get(
+		"/automated-messages/topfan",
+		{
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+				sessionManager.requireProfileHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session!;
+
+			const profile = await session.getProfile(prisma);
+			if (!profile) {
+				return reply.sendError(APIErrors.PROFILE_NOT_FOUND);
+			}
+
+			const topFanNotification =
+				await prisma.topFanNotification.findFirst({
+					where: {
+						profileId: profile.id,
+					},
+					select: {
+						text: true,
+						image: true,
+						top1Enabled: true,
+						top5Enabled: true,
+						top10Enabled: true,
+						customMessageEnabled: true,
+					},
+				});
+
+			reply.send(topFanNotification);
+		},
+	);
+
+	fastify.post<{ Body: TopFanNotificationReqBody }>(
+		"/automated-messages/topfan",
+		{
+			schema: {
+				body: TopFanNotificationReqBodyValidator,
+			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+				sessionManager.requireProfileHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session!;
+
+			const profile = await session.getProfile(prisma);
+			if (!profile) {
+				return reply.sendError(APIErrors.PROFILE_NOT_FOUND);
+			}
+
+			const {
+				text,
+				image,
+				top1Enabled,
+				top5Enabled,
+				top10Enabled,
+				customMessageEnabled,
+			} = request.body;
+
+			const topFanNotification =
+				await prisma.topFanNotification.findFirst({
+					where: {
+						profileId: profile.id,
+					},
+				});
+
+			await prisma.topFanNotification.upsert({
+				where: {
+					id: topFanNotification?.id ?? snowflake.gen(),
+					profileId: profile.id,
+				},
+				create: {
+					id: snowflake.gen(),
+					profileId: profile.id,
+					text,
+					image: image ? BigInt(image) : null,
+					top1Enabled,
+					top5Enabled,
+					top10Enabled,
+					customMessageEnabled,
+				},
+				update: {
+					text,
+					image: image ? BigInt(image) : null,
+					top1Enabled,
+					top5Enabled,
+					top10Enabled,
+					customMessageEnabled,
+				},
+			});
+
+			reply.status(200).send(topFanNotification);
+		},
+	);
+
+	fastify.put<{ Body: UpdateTopFanNotificationReqBody }>(
+		"/automated-messages/topfan/settings",
+		{
+			schema: {
+				body: UpdateTopFanNotificationReqBodyValidator,
+			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+				sessionManager.requireProfileHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session!;
+
+			const profile = await session.getProfile(prisma);
+			if (!profile) {
+				return reply.sendError(APIErrors.PROFILE_NOT_FOUND);
+			}
+
+			const {
+				top1Enabled,
+				top5Enabled,
+				top10Enabled,
+				customMessageEnabled,
+			} = request.body;
+
+			const topFanNotification =
+				await prisma.topFanNotification.findFirst({
+					where: {
+						profileId: profile.id,
+					},
+				});
+
+			await prisma.topFanNotification.upsert({
+				where: {
+					id: topFanNotification?.id ?? snowflake.gen(),
+					profileId: profile.id,
+				},
+				create: {
+					id: snowflake.gen(),
+					profileId: profile.id,
+					top1Enabled,
+					top5Enabled,
+					top10Enabled,
+					customMessageEnabled,
+				},
+				update: {
+					top1Enabled,
+					top5Enabled,
+					top10Enabled,
+					customMessageEnabled,
+				},
+			});
+
+			reply.status(201).send();
 		},
 	);
 

@@ -17,6 +17,7 @@ import SnowflakeService from "../../../common/service/SnowflakeService.js";
 import StripeService from "../../../common/service/StripeService.js";
 import NotificationService from "../../../common/service/NotificationService.js";
 import EmailTemplateSenderService from "../../../common/service/EmailTemplateSenderService.js";
+import TopFanNotificationService from "../../../common/service/TopFanNotification.js";
 import SiftService from "../../../common/service/SiftService.js";
 import APIErrors from "../../errors/index.js";
 import { FastifyTypebox } from "../../types.js";
@@ -108,6 +109,9 @@ export default async function routes(
 		EmailTemplateSenderService,
 	);
 	const siftService = await container.resolve(SiftService);
+	const topFanNotificationService = await container.resolve(
+		TopFanNotificationService,
+	);
 
 	const formatPriceForNotification = (
 		dinero: Dinero,
@@ -2184,6 +2188,10 @@ export default async function routes(
 								id: paymentSubscription.creatorId.toString(),
 							},
 						);
+
+						await topFanNotificationService.sendTopFanNotification(
+							paymentSubscription.creatorId,
+						);
 					}
 
 					if (status === TransactionStatus.Disputed) {
@@ -2716,6 +2724,10 @@ export default async function routes(
 								id: paidPostTransaction.creatorId.toString(),
 							},
 						);
+
+						await topFanNotificationService.sendTopFanNotification(
+							paidPostTransaction.creatorId,
+						);
 					}
 
 					if (status === TransactionStatus.Failed) {
@@ -2979,6 +2991,10 @@ export default async function routes(
 								id: chatPaidPostTransaction.creatorId.toString(),
 							},
 						);
+
+						await topFanNotificationService.sendTopFanNotification(
+							chatPaidPostTransaction.creatorId,
+						);
 					}
 
 					if (status === TransactionStatus.Failed) {
@@ -3089,6 +3105,10 @@ export default async function routes(
 							{
 								id: cameoPayment.creatorId.toString(),
 							},
+						);
+
+						await topFanNotificationService.sendTopFanNotification(
+							cameoPayment.creatorId,
 						);
 					}
 
@@ -3203,6 +3223,10 @@ export default async function routes(
 							{
 								id: videoCallPurchase.creatorId.toString(),
 							},
+						);
+
+						await topFanNotificationService.sendTopFanNotification(
+							videoCallPurchase.creatorId,
 						);
 					}
 

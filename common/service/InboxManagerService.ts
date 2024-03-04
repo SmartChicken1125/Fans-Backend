@@ -138,6 +138,31 @@ interface IMessageCreateOptionsPaidPost extends IMessageCreateOptionsBase {
 	parentId?: string;
 }
 
+interface IMessageCreateOptionsTopFanNotification
+	extends IMessageCreateOptionsBase {
+	messageType: MessageType.TOP_FAN_NOTIFICATION;
+
+	/**
+	 * Message content. Must be less than 2000 characters and not empty.
+	 */
+	content?: string;
+
+	/**
+	 * Message content. Must be less than 2000 characters and not empty.
+	 */
+	value: number;
+
+	/**
+	 * IDs of the uploads to attach to the message. Must be between 1 and 4 and belong to the user.
+	 */
+	uploadIds?: bigint[];
+
+	/**
+	 * ID of the message to reply to. Must belong to the same channel.
+	 */
+	parentId?: string;
+}
+
 /**
  * Options for creating a message.
  */
@@ -145,7 +170,8 @@ export type IMessageCreateOptions =
 	| IMessageCreateOptionsText
 	| IMessageCreateOptionsMedia
 	| IMessageCreateOptionsGif
-	| IMessageCreateOptionsPaidPost;
+	| IMessageCreateOptionsPaidPost
+	| IMessageCreateOptionsTopFanNotification;
 
 export interface MessageWithUser extends Message {
 	user: UserBasicParam;
@@ -868,6 +894,49 @@ class InboxManagerService {
 						})),
 					},
 					status: TransactionStatus.Submitted,
+					parentId: parentId ? BigInt(parentId) : undefined,
+				},
+			});
+		} else if (messageType === MessageType.TOP_FAN_NOTIFICATION) {
+			const { content, value, uploadIds } = options;
+
+			if (!value) {
+				throw new APIErrorException(
+					genericAPIErrors.INVALID_REQUEST("Empty value"),
+				);
+			}
+
+			const uploads = uploadIds
+				? await this.#prisma.upload.findMany({
+						where: {
+							id: {
+								in: uploadIds,
+							},
+							type: { in: [UploadType.Image, UploadType.Video] },
+							usage: UploadUsageType.CHAT,
+							userId,
+							completed: true,
+						},
+				  })
+				: [];
+
+			message = await this.#prisma.message.create({
+				include: {
+					uploads: true,
+					parentMessage: true,
+				},
+				data: {
+					id: this.#snowflake.gen(),
+					channelId,
+					userId,
+					content: content ?? "",
+					value,
+					messageType,
+					uploads: {
+						connect: uploads.map((u) => ({
+							id: BigInt(u.id),
+						})),
+					},
 					parentId: parentId ? BigInt(parentId) : undefined,
 				},
 			});
