@@ -1525,15 +1525,10 @@ export default async function routes(fastify: FastifyTypebox) {
 							userId: BigInt(session.userId),
 						},
 				  })
-				: await prisma.userList.findMany({
-						where: {
-							userId: BigInt(session.userId),
-							enabled: true,
-						},
-				  });
+				: undefined;
 
 			const activeCreatorIds =
-				userLists.length > 0
+				userLists && userLists.length > 0
 					? await prisma.userListUser.findMany({
 							where: {
 								userlistId: {
@@ -2347,14 +2342,6 @@ export default async function routes(fastify: FastifyTypebox) {
 							},
 						}),
 					],
-				);
-
-				console.log(
-					"=======================================> accessiblePaidPosts ",
-					accessiblePaidPosts,
-					accessiblePaidPosts
-						.map((p) => p.id)
-						.includes(BigInt("153084048835059712")),
 				);
 
 				await Promise.all(

@@ -91,6 +91,9 @@ import LinkPreviewService, {
 	linkPreviewServiceFactory,
 } from "./common/service/LinkPreviewService.js";
 import { CameoService } from "./common/service/CameoService.js";
+import CaptchaService, {
+	captchaFactory,
+} from "./common/service/CaptchaService.js";
 
 dotenv.config();
 
@@ -211,6 +214,7 @@ container
 	.bindAsyncFactory(LinkPreviewService, linkPreviewServiceFactory)
 	.asSingleton();
 container.bindClass(CameoService).asSingleton();
+container.bindAsyncFactory(CaptchaService, captchaFactory).asSingleton();
 
 for (let service of services) {
 	logger.info(`Starting service: ${service}`);

@@ -158,4 +158,11 @@ export const authAPIErrors = {
 			message: "This email has already been verified.",
 		},
 	},
+	UNSUPPORTED_CAPTCHA: {
+		status: 400,
+		data: {
+			code: errorCode(ErrorSource.Auth, 23),
+			message: "Captcha provider is not supported",
+		},
+	},
 };

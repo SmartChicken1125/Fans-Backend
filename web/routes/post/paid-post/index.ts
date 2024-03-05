@@ -32,6 +32,7 @@ import CloudflareStreamService from "../../../../common/service/CloudflareStream
 import MediaUploadService from "../../../../common/service/MediaUploadService.js";
 import { TaxjarError } from "taxjar/dist/util/types.js";
 import InboxManagerService from "../../../../common/service/InboxManagerService.js";
+import { checkAccess } from "../../../utils/CheckUtils.js";
 
 const DECIMAL_TO_CENT_FACTOR = 100;
 
@@ -891,7 +892,7 @@ export default async function routes(fastify: FastifyTypebox) {
 		async (request, reply) => {
 			const { sort = "Latest", page = 1, size = 6 } = request.query;
 			const { id: userId } = request.params;
-			const session = request.session!;
+			const session = request.session;
 			const profile = await prisma.profile.findFirst({
 				where: { userId: BigInt(userId), disabled: false },
 			});
@@ -900,49 +901,115 @@ export default async function routes(fastify: FastifyTypebox) {
 				return reply.sendError(APIErrors.ITEM_NOT_FOUND("Profile"));
 			}
 
-			const total = await prisma.paidPost.count({
-				where: {
-					post: { profileId: profile.id, isPosted: true },
-				},
-				orderBy:
-					sort === "Latest"
-						? [
-								{ isPinned: "desc" },
-								{ post: { updatedAt: "desc" } },
-						  ]
+			if (session) {
+				const isSelf = userId === session.userId;
+				const whereCondition = {
+					OR: isSelf
+						? undefined
 						: [
-								{ isPinned: "desc" },
-								{ post: { updatedAt: "asc" } },
+								{
+									AND: [
+										{
+											roles: { none: {} },
+											tiers: { none: {} },
+											users: { none: {} },
+										},
+									],
+								},
+								{
+									roles: {
+										some: {
+											role: {
+												userLevels: {
+													some: {
+														userId: BigInt(
+															session.userId,
+														),
+													},
+												},
+											},
+										},
+									},
+								},
+								{
+									tiers: {
+										some: {
+											tier: {
+												paymentSubscriptions: {
+													some: {
+														userId: BigInt(
+															session.userId,
+														),
+														status: SubscriptionStatus.Active,
+													},
+												},
+											},
+										},
+									},
+								},
+								{
+									users: {
+										some: {
+											user: {
+												id: BigInt(session.userId),
+											},
+										},
+									},
+								},
 						  ],
-			});
-
-			if (isOutOfRange(page, size, total)) {
-				return reply.sendError(APIErrors.OUT_OF_RANGE);
-			}
-
-			const currentDate = new Date();
-			const oneDayBefore = new Date(
-				currentDate.getTime() - 24 * 60 * 60 * 1000,
-			);
-
-			const [rows, metadata, accessiblePaidPosts] = await Promise.all([
-				prisma.paidPost.findMany({
-					where: {
-						post: { profileId: profile.id, isPosted: true },
-					},
+					profileId: profile.id,
+					isArchived: false,
+					isPosted: true,
+					isPaidPost: true,
+				};
+				const total = await prisma.post.count({
+					where: whereCondition,
 					orderBy:
 						sort === "Latest"
-							? [
-									{ isPinned: "desc" },
-									{ post: { updatedAt: "desc" } },
-							  ]
-							: [
-									{ isPinned: "desc" },
-									{ post: { updatedAt: "asc" } },
-							  ],
-					include: {
-						thumbs: { include: { upload: true } },
-						post: {
+							? [{ isPinned: "desc" }, { updatedAt: "desc" }]
+							: [{ isPinned: "desc" }, { updatedAt: "asc" }],
+				});
+
+				if (isOutOfRange(page, size, total)) {
+					return reply.sendError(APIErrors.OUT_OF_RANGE);
+				}
+				const currentDate = new Date();
+				const oneDayBefore = new Date(
+					currentDate.getTime() - 24 * 60 * 60 * 1000,
+				);
+
+				const hasAccess = await checkAccess(
+					prisma,
+					BigInt(session.userId),
+					profile.userId,
+					profile.id,
+				);
+
+				if (!hasAccess) {
+					return reply.send({
+						posts: [],
+						page,
+						size,
+						total,
+						hasAccess: false,
+					});
+				}
+
+				const [rows, metadata, accessiblePaidPosts] = await Promise.all(
+					[
+						prisma.post.findMany({
+							where: whereCondition,
+							orderBy:
+								sort === "Latest"
+									? [
+											{ isPinned: "desc" },
+											{ updatedAt: "desc" },
+									  ]
+									: [
+											{ isPinned: "desc" },
+											{ updatedAt: "asc" },
+									  ],
+
 							include: {
 								thumbMedia: true,
 								postMedias: {
@@ -957,7 +1024,9 @@ export default async function routes(fastify: FastifyTypebox) {
 								},
 								paidPost: {
 									include: {
-										thumbs: { include: { upload: true } },
+										thumbs: {
+											include: { upload: true },
+										},
 									},
 								},
 								fundraiser: {
@@ -966,18 +1035,24 @@ export default async function routes(fastify: FastifyTypebox) {
 								giveaway: {
 									include: {
 										thumbMedia: true,
-										roles: { include: { role: true } },
+										roles: {
+											include: { role: true },
+										},
 									},
 								},
 								poll: {
 									include: {
 										thumbMedia: true,
-										roles: { include: { role: true } },
+										roles: {
+											include: { role: true },
+										},
 										pollAnswers: {
 											include: {
 												pollVotes: true,
 												_count: {
-													select: { pollVotes: true },
+													select: {
+														pollVotes: true,
+													},
 												},
 											},
 										},
@@ -991,7 +1066,9 @@ export default async function routes(fastify: FastifyTypebox) {
 										stories: {
 											where: {
 												profileId: profile.id,
-												updatedAt: { gt: oneDayBefore },
+												updatedAt: {
+													gt: oneDayBefore,
+												},
 											},
 											include: {
 												upload: true,
@@ -1002,13 +1079,17 @@ export default async function routes(fastify: FastifyTypebox) {
 													},
 												},
 											},
-											orderBy: { updatedAt: "asc" },
+											orderBy: {
+												updatedAt: "asc",
+											},
 										},
 									},
 								},
 								categories: {
 									include: { category: true },
-									orderBy: { category: { order: "asc" } },
+									orderBy: {
+										category: { order: "asc" },
+									},
 								},
 								_count: {
 									select: {
@@ -1018,27 +1099,21 @@ export default async function routes(fastify: FastifyTypebox) {
 									},
 								},
 							},
-						},
-					},
-					take: size,
-					skip: (page - 1) * size,
-				}),
-				prisma.paidPost.findMany({
-					where: {
-						post: { profileId: profile.id, isPosted: true },
-					},
-					orderBy:
-						sort === "Latest"
-							? [
-									{ isPinned: "desc" },
-									{ post: { updatedAt: "desc" } },
-							  ]
-							: [
-									{ isPinned: "desc" },
-									{ post: { updatedAt: "asc" } },
-							  ],
-					include: {
-						post: {
+							take: size,
+							skip: (page - 1) * size,
+						}),
+						prisma.post.findMany({
+							where: whereCondition,
+							orderBy:
+								sort === "Latest"
+									? [
+											{ isPinned: "desc" },
+											{ updatedAt: "desc" },
+									  ]
+									: [
+											{ isPinned: "desc" },
+											{ updatedAt: "asc" },
+									  ],
 							include: {
 								postMedias: {
 									include: {
@@ -1070,15 +1145,8 @@ export default async function routes(fastify: FastifyTypebox) {
 									},
 								},
 								paidPost: {
-									where: {
-										PaidPostTransaction: {
-											some: {
-												userId: BigInt(session.userId),
-												status: TransactionStatus.Successful,
-											},
-										},
-									},
 									include: {
+										thumbs: { include: { upload: true } },
 										PaidPostTransaction: {
 											where: {
 												userId: BigInt(session.userId),
@@ -1088,142 +1156,160 @@ export default async function routes(fastify: FastifyTypebox) {
 									},
 								},
 							},
-						},
-					},
 
-					take: size,
-					skip: (page - 1) * size,
-				}),
-				prisma.post.findMany({
-					where: {
-						paidPost: {
-							OR: [
-								{
-									rolePaidPosts: {
-										some: {
-											role: {
-												userLevels: {
-													some: {
-														userId: BigInt(
+							take: size,
+							skip: (page - 1) * size,
+						}),
+						prisma.post.findMany({
+							where: {
+								paidPost: {
+									OR: [
+										{
+											rolePaidPosts: {
+												some: {
+													role: {
+														userLevels: {
+															some: {
+																userId: BigInt(
+																	session.userId,
+																),
+															},
+														},
+													},
+												},
+											},
+										},
+										{
+											tierPaidPosts: {
+												some: {
+													tier: {
+														paymentSubscriptions: {
+															some: {
+																userId: BigInt(
+																	session.userId,
+																),
+																status: SubscriptionStatus.Active,
+															},
+														},
+													},
+												},
+											},
+										},
+										{
+											userPaidPosts: {
+												some: {
+													user: {
+														id: BigInt(
 															session.userId,
 														),
 													},
 												},
 											},
 										},
-									},
+									],
 								},
-								{
-									tierPaidPosts: {
-										some: {
-											tier: {
-												paymentSubscriptions: {
-													some: {
-														userId: BigInt(
-															session.userId,
-														),
-														status: SubscriptionStatus.Active,
-													},
-												},
-											},
-										},
-									},
-								},
-								{
-									userPaidPosts: {
-										some: {
-											user: {
-												id: BigInt(session.userId),
-											},
-										},
-									},
-								},
-							],
-						},
-					},
-					select: {
-						id: true,
-					},
-				}),
-			]);
+							},
+							select: {
+								id: true,
+							},
+						}),
+					],
+				);
 
-			await Promise.all(
-				rows.map((p) =>
-					resolveURLsPostLike(p.post, cloudflareStream, mediaUpload),
-				),
-			);
+				await Promise.all(
+					rows.map((p) =>
+						resolveURLsPostLike(p, cloudflareStream, mediaUpload),
+					),
+				);
+				const result: PostsRespBody = {
+					posts: rows.map((row) => {
+						return {
+							...ModelConverter.toIPost(row, {
+								isBookmarked: metadata.find(
+									(m) => m.id === row.id,
+								)
+									? metadata.find((m) => m.id === row.id)!
+											._count.bookmarks > 0
+									: false,
+								isCommented: metadata.find(
+									(m) => m.id === row.id,
+								)
+									? metadata.find((m) => m.id === row.id)!
+											._count.comments > 0
+									: false,
+								isLiked: metadata.find((m) => m.id === row.id)
+									? metadata.find((m) => m.id === row.id)!
+											._count.postLikes > 0
+									: false,
+								isPaidOut:
+									metadata.find((m) => m.id === row.id) &&
+									metadata.find((m) => m.id === row.id)!
+										.paidPost
+										? metadata.find((m) => m.id === row.id)!
+												.paidPost!.PaidPostTransaction
+												.length > 0 ||
+										  accessiblePaidPosts
+												.map((p) => p.id)
+												.includes(row.id)
+										: false,
+								isSelf,
+								isExclusive: row.roles.length > 0,
+							}),
+							paidPost: row.paidPost
+								? ModelConverter.toIPaidPost(row.paidPost)
+								: undefined,
+							profile: ModelConverter.toIProfile(row.profile),
+							categories: row.categories.map((c) =>
+								ModelConverter.toICategory(c.category),
+							),
+							fundraiser: row.fundraiser
+								? ModelConverter.toIFundraiser(row.fundraiser)
+								: undefined,
+							giveaway: row.giveaway
+								? {
+										...ModelConverter.toIGiveaway(
+											row.giveaway,
+										),
+										roles: row.giveaway.roles.map((role) =>
+											ModelConverter.toIRole(role.role),
+										),
+								  }
+								: undefined,
+							poll: row.poll
+								? {
+										...ModelConverter.toIPoll(row.poll),
+										roles: row.poll.roles.map((r) =>
+											ModelConverter.toIRole(r.role),
+										),
+								  }
+								: undefined,
+							roles: row.roles.map((r) =>
+								ModelConverter.toIRole(r.role),
+							),
+						};
+					}),
+					page,
+					size,
+					total,
+					hasAccess: true,
+				};
+
+				return reply.send(result);
+			}
+
+			const total = await prisma.post.count({
+				where: {
+					profileId: profile.id,
+					isArchived: false,
+				},
+			});
 
 			const result: PostsRespBody = {
-				posts: rows.map((row) => {
-					return {
-						...ModelConverter.toIPost(row.post, {
-							isBookmarked: metadata.find(
-								(m) => m.postId === row.postId,
-							)
-								? metadata.find((m) => m.postId === row.postId)!
-										.post._count.bookmarks > 0
-								: false,
-							isCommented: metadata.find(
-								(m) => m.postId === row.postId,
-							)
-								? metadata.find((m) => m.postId === row.postId)!
-										.post._count.comments > 0
-								: false,
-							isLiked: metadata.find(
-								(m) => m.postId === row.postId,
-							)
-								? metadata.find((m) => m.postId === row.postId)!
-										.post._count.postLikes > 0
-								: false,
-							isPaidOut:
-								metadata.find((m) => m.id === row.id) &&
-								metadata.find((m) => m.id === row.id)!.post
-									.paidPost
-									? metadata.find((m) => m.id === row.id)!
-											.post.paidPost!.PaidPostTransaction
-											.length > 0 ||
-									  accessiblePaidPosts
-											.map((p) => p.id)
-											.includes(row.postId)
-									: false,
-							isSelf: true,
-							isExclusive: row.post.roles.length > 0,
-						}),
-						paidPost: ModelConverter.toIPaidPost(row),
-						profile: ModelConverter.toIProfile(row.post.profile),
-						categories: row.post.categories.map((c) =>
-							ModelConverter.toICategory(c.category),
-						),
-						fundraiser: row.post.fundraiser
-							? ModelConverter.toIFundraiser(row.post.fundraiser)
-							: undefined,
-						giveaway: row.post.giveaway
-							? {
-									...ModelConverter.toIGiveaway(
-										row.post.giveaway,
-									),
-									roles: row.post.giveaway.roles.map((role) =>
-										ModelConverter.toIRole(role.role),
-									),
-							  }
-							: undefined,
-						poll: row.post.poll
-							? {
-									...ModelConverter.toIPoll(row.post.poll),
-									roles: row.post.poll.roles.map((r) =>
-										ModelConverter.toIRole(r.role),
-									),
-							  }
-							: undefined,
-						roles: row.post.roles.map((r) =>
-							ModelConverter.toIRole(r.role),
-						),
-					};
-				}),
+				posts: [],
 				page,
 				size,
 				total,
-				hasAccess: true,
+				hasAccess: false,
 			};
 			return reply.send(result);
 		},

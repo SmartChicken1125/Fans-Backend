@@ -57,6 +57,7 @@ import {
 } from "./validation.js";
 import RedisService from "../../../common/service/RedisService.js";
 import { genOTP } from "../../../common/utils/OTPGenerator.js";
+import CaptchaService from "../../../common/service/CaptchaService.js";
 import { User } from "@prisma/client";
 import { ISession } from "../../CommonAPISchemas.js";
 
@@ -77,6 +78,7 @@ export default async function routes(
 	const emailService = await container.resolve(EmailerService);
 	const siftService = await container.resolve(SiftService);
 	const redis = await container.resolve(RedisService);
+	const captchaService = await container.resolve(CaptchaService);
 
 	const resetPasswordCodeKey = (code: string) => `resetPasswordCodes:${code}`;
 
@@ -140,7 +142,10 @@ export default async function routes(
 				rateLimit: {},
 			},
 			schema: { body: AuthPasswordRegisterReqBodyValidator },
-			preHandler: [sessionManager.sessionPreHandler],
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				captchaService.requireCaptchaHandler,
+			],
 		},
 		async (request, reply) => {
 			if (request.session) {
@@ -407,6 +412,7 @@ export default async function routes(
 			schema: {
 				body: AuthForgotPasswordReqBodyValidator,
 			},
+			preHandler: [captchaService.requireCaptchaHandler],
 		},
 		async (request, reply) => {
 			// verify user is exist
@@ -538,6 +544,7 @@ export default async function routes(
 			preHandler: [
 				sessionManager.sessionPreHandler,
 				sessionManager.requireAuthNoVerificationHandler,
+				captchaService.requireCaptchaHandler,
 			],
 		},
 		async (request, reply) => {
