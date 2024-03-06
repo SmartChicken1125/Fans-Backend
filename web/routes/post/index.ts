@@ -1978,7 +1978,6 @@ export default async function routes(fastify: FastifyTypebox) {
 			}
 
 			const session = request.session;
-			console.log("session=", session);
 			if (session) {
 				const hiddenPosts = await prisma.hiddenPost.findMany({
 					select: { postId: true },
@@ -2108,7 +2107,6 @@ export default async function routes(fastify: FastifyTypebox) {
 					currentDate.getTime() - 24 * 60 * 60 * 1000,
 				);
 
-				console.log("hiddenStoryIds=", hiddenStoryIds);
 				const [rows, metadata, accessiblePaidPosts] = await Promise.all(
 					[
 						prisma.post.findMany({
