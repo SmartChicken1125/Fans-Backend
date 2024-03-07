@@ -2156,6 +2156,11 @@ export default async function routes(fastify: FastifyTypebox) {
 										stories: {
 											where: {
 												id: { notIn: hiddenStoryIds },
+												// profile: {
+												// 	userId: BigInt(
+												// 		session.userId,
+												// 	),
+												// },
 												updatedAt: { gt: oneDayBefore },
 											},
 											include: {
