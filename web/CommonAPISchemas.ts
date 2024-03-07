@@ -481,6 +481,9 @@ export interface IPaidPost {
 	price: number;
 	currency: string;
 	thumbs?: Media[];
+	tiers: string[];
+	roles: string[];
+	users: string[];
 	isPinned: boolean;
 	isHidden: boolean;
 	updatedAt: string;
@@ -523,6 +526,7 @@ export interface ISchedule {
 	postId: string;
 	startDate: string;
 	endDate?: string;
+	timezone: string;
 	updatedAt: string;
 }
 
@@ -725,8 +729,8 @@ export interface IStoryUrl {
 export interface IStoryTag {
 	id: string;
 	storyId: string;
-	creatorId: string;
-	creator: IProfile;
+	userId: string;
+	user: IUser;
 	color: string;
 	pointX: number;
 	pointY: number;
@@ -1043,6 +1047,7 @@ export interface IPayoutLog {
 	id: string;
 	profileId: string;
 	payoutPaymentMethodId: string;
+	paymentInformation?: string;
 	amount: number;
 	processingFee: number;
 	currency: string;

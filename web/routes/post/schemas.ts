@@ -75,6 +75,7 @@ export interface PollBody {
 export interface ScheduleBody {
 	startDate: string;
 	endDate?: string;
+	timezone: string;
 }
 
 export interface TaggedPeople {

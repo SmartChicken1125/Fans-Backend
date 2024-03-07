@@ -5,11 +5,34 @@
 import { IPayoutLog, IStripeForm } from "../../CommonAPISchemas.js";
 
 export interface PayoutMethodReqBody {
-	bankInfo?: IStripeForm;
-	paypalEmail?: string;
 	country: string;
+	state: string;
+	city: string;
+	street: string;
+	unit?: string;
+	zip: string;
+
 	entityType: string;
-	usCitizenOrResident: boolean;
+	usCitizenOrResident?: boolean;
+
+	firstName?: string;
+	lastName?: string;
+	company?: string;
+
+	payoutMethod: string;
+
+	revolut?: string;
+	payoneer?: string;
+
+	routingNumber?: string;
+	accountNumber?: string;
+
+	iban?: string;
+	swift?: string;
+
+	paypalEmail?: string;
+
+	bankInfo?: IStripeForm;
 }
 
 export interface GetPayoutMethodReqBody {
@@ -35,6 +58,13 @@ export interface UpdatePayoutScheduleReqBody {
 	mode: string;
 	threshold?: number;
 }
+
+export type PayoutLogReqQuery = {
+	page: number;
+	size?: number;
+	filter?: string;
+	orderBy?: string;
+};
 
 export type PayoutLogRespBody = IPayoutLog;
 

@@ -137,22 +137,20 @@ class MediaUploadService {
 		key: string,
 		storage: UploadStorageType,
 	): Promise<string | undefined> {
-		const imageBuffer = await this.getImageBuffer(key);
-		const rawImageData = await sharp(imageBuffer)
+		if (storage !== UploadStorageType.S3) return undefined;
+
+		const image = await sharp(await this.getImageBuffer(key))
+			.resize(16, 16, { fit: "cover" })
 			.raw()
-			.ensureAlpha()
-			.toBuffer();
-		const metadata = await sharp(imageBuffer).metadata();
-		if (metadata.width && metadata.height) {
-			return encode(
-				new Uint8ClampedArray(rawImageData.buffer),
-				metadata.width,
-				metadata.height,
-				4,
-				4,
-			);
-		}
-		return undefined;
+			.ensureAlpha();
+
+		return encode(
+			new Uint8ClampedArray(await image.toBuffer()),
+			16,
+			16,
+			4,
+			4,
+		);
 	}
 
 	private async getImageBuffer(key: string): Promise<Buffer> {

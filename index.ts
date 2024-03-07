@@ -9,6 +9,7 @@ import { isTrueString, nonNaN } from "./common/Validation.js";
 import AgeCheckerService, {
 	ageCheckerFactory,
 } from "./common/service/AgeCheckerService.js";
+import AiService from "./common/service/AiService.js";
 import {
 	AmqpClientService,
 	amqpClientFactory,
@@ -19,24 +20,48 @@ import AuthorizeNetService, {
 import BullMQService, {
 	bullMQFactory,
 } from "./common/service/BullMQService.js";
+import { CameoService } from "./common/service/CameoService.js";
+import CaptchaService, {
+	captchaFactory,
+} from "./common/service/CaptchaService.js";
+import { ChimeService, chimeFactory } from "./common/service/ChimeService.js";
+import CloudflareStreamService, {
+	cloudflareStreamFactory,
+} from "./common/service/CloudflareStreamService.js";
+import DiscordService, {
+	discordFactory,
+} from "./common/service/DiscordService.js";
+import EmailTemplateSenderService from "./common/service/EmailTemplateSenderService.js";
+import EmailerService from "./common/service/EmailerService.js";
 import FeesCalculatorService, {
 	feesCalculatorFactory,
 } from "./common/service/FeesCalculatorService.js";
 import GemExchangeService, {
 	gemExchangeFactory,
 } from "./common/service/GemExchangeService.js";
+import InboxManagerService, {
+	inboxManagerFactory,
+} from "./common/service/InboxManagerService.js";
+import LinkPreviewService, {
+	linkPreviewServiceFactory,
+} from "./common/service/LinkPreviewService.js";
 import MediaUploadService, {
 	mediaUploadFactory,
 } from "./common/service/MediaUploadService.js";
+import { MeetingService } from "./common/service/MeetingService.js";
 import NotificationService, {
 	notificationFactory,
 } from "./common/service/NotificationService.js";
 import OAuth2Service, {
 	oAuth2Factory,
 } from "./common/service/OAuth2Service.js";
+import OndatoService, {
+	ondatoFactory,
+} from "./common/service/OndatoService.js";
 import PayPalService, {
 	paypalFactory,
 } from "./common/service/PayPalService.js";
+import { PaymentService } from "./common/service/PaymentService.js";
 import PayoutService, {
 	payoutFactory,
 } from "./common/service/PayoutService.js";
@@ -52,8 +77,8 @@ import ScraperService, {
 	scraperFactory,
 } from "./common/service/ScraperService.js";
 import { sendInBlueEmailerFactory } from "./common/service/SendInBlueEmailerService.js";
-import EmailTemplateSenderService from "./common/service/EmailTemplateSenderService.js";
 import SessionManagerService from "./common/service/SessionManagerService.js";
+import SiftService, { siftFactory } from "./common/service/SiftService.js";
 import SnowflakeService, {
 	snowflakeFactory,
 } from "./common/service/SnowflakeService.js";
@@ -66,34 +91,8 @@ import TaxJarService, {
 import TopFanNotificationService, {
 	topFanNotificationFactory,
 } from "./common/service/TopFanNotification.js";
-import { registerFormats } from "./common/validators/validation.js";
-
-import AiService from "./common/service/AiService.js";
-import CloudflareStreamService, {
-	cloudflareStreamFactory,
-} from "./common/service/CloudflareStreamService.js";
-import DiscordService, {
-	discordFactory,
-} from "./common/service/DiscordService.js";
-import EmailerService from "./common/service/EmailerService.js";
-import InboxManagerService, {
-	inboxManagerFactory,
-} from "./common/service/InboxManagerService.js";
-import OndatoService, {
-	ondatoFactory,
-} from "./common/service/OndatoService.js";
-import SiftService, { siftFactory } from "./common/service/SiftService.js";
-import { chimeFactory, ChimeService } from "./common/service/ChimeService.js";
-import { MeetingService } from "./common/service/MeetingService.js";
-import { PaymentService } from "./common/service/PaymentService.js";
 import XPService, { xpServiceFactory } from "./common/service/XPService.js";
-import LinkPreviewService, {
-	linkPreviewServiceFactory,
-} from "./common/service/LinkPreviewService.js";
-import { CameoService } from "./common/service/CameoService.js";
-import CaptchaService, {
-	captchaFactory,
-} from "./common/service/CaptchaService.js";
+import { registerFormats } from "./common/validators/validation.js";
 
 dotenv.config();
 
@@ -142,8 +141,8 @@ if (services.includes("chat")) {
 }
 
 const validServices = [
-	"admin",
 	"api",
+	"frontend",
 	"realtime",
 	"cli",
 	"public-api",

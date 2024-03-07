@@ -245,6 +245,7 @@ model User {
     top1Fans                        Top1Fan[]
     top5Fans                        Top5Fan[]
     top10Fans                       Top10Fan[]
+    storyTags                       StoryTag[]
 
     @@index([username], type: BTree)
     @@index([displayName], type: BTree)
@@ -702,7 +703,6 @@ model Profile {
     CustomVideoSettings                 CustomVideoSettings[]
     videoCallPurchase                   VideoCallPurchase[]
     meetingVacations                    MeetingVacation[]
-    storyTags                           StoryTag[]
     customVideoOrders                   CustomVideoOrder[]
     Review                              Review[]
     meetingPreviewUploads               MeetingPreviewUpload[]
@@ -938,22 +938,66 @@ enum EntityType {
     Corporation
 }
 
+enum PayoutMethod {
+    Revolut
+    Payoneer
+    DirectDeposit
+    IBAN
+}
+
 model PayoutPaymentMethod {
-    id                  BigInt          @id
-    profile             Profile         @relation(fields: [profileId], references: [id], onDelete: Cascade)
-    profileId           BigInt
-    provider            PaymentProvider
-    paypalEmail         String?
-    bankInfo            BankInfo?
-    bankInfoId          BigInt?
-    country             String
+    id        BigInt  @id
+    profile   Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+    profileId BigInt
+
+    country String
+    state   String?
+    city    String?
+    street  String?
+    unit    String?
+    zip     String?
+
     entityType          EntityType
     usCitizenOrResident Boolean
-    updatedAt           DateTime        @updatedAt
+    payoutMethod        PayoutMethod @default(IBAN)
+
+    firstName String?
+    lastName  String?
+    company   String?
+
+    revolut  String?
+    payoneer String?
+
+    routingNumber String?
+    accountNumber String?
+
+    iban  String?
+    swift String?
+
+    paypalEmail String?
+
+    bankInfo   BankInfo?
+    bankInfoId BigInt?
+
+    unusedProvider PaymentProvider @map("provider")
+
+    isDeleted  Boolean     @default(false)
+    updatedAt  DateTime    @updatedAt
+    payoutLogs PayoutLog[]
 
     @@index([profileId], type: BTree)
-    @@index([provider], type: Hash)
-    @@index([paypalEmail], type: BTree)
+    @@index([country], type: BTree)
+    @@index([state], type: BTree)
+    @@index([city], type: BTree)
+    @@index([street], type: BTree)
+    @@index([unit], type: BTree)
+    @@index([zip], type: BTree)
+    @@index([entityType], type: Hash)
+    @@index([usCitizenOrResident], type: Hash)
+    @@index([payoutMethod], type: Hash)
+    @@index([firstName], type: BTree)
+    @@index([lastName], type: BTree)
+    @@index([company], type: BTree)
     @@index([updatedAt], type: BTree)
     @@map("payout_payment_methods")
 }
@@ -1011,15 +1055,16 @@ model PayoutSchedule {
 }
 
 model PayoutLog {
-    id                    BigInt            @id
+    id                    BigInt              @id
     profileId             BigInt
+    payoutPaymentMethod   PayoutPaymentMethod @relation(fields: [payoutPaymentMethodId], references: [id])
     payoutPaymentMethodId BigInt
     amount                Int
     processingFee         Int
-    currency              String            @default("USD")
+    currency              String              @default("USD")
     status                TransactionStatus
-    updatedAt             DateTime          @updatedAt
-    createdAt             DateTime          @default(now())
+    updatedAt             DateTime            @updatedAt
+    createdAt             DateTime            @default(now())
 
     @@index([profileId], type: BTree)
     @@index([payoutPaymentMethodId], type: BTree)
@@ -1413,6 +1458,7 @@ model Schedule {
     jobId     String?
     startDate DateTime
     endDate   DateTime?
+    timezone  String?
     updatedAt DateTime  @updatedAt
 
     @@index([postId], type: BTree)
@@ -1922,18 +1968,19 @@ model StoryUrl {
 }
 
 model StoryTag {
-    id        BigInt   @id
-    story     Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
-    storyId   BigInt
-    creator   Profile  @relation(fields: [creatorId], references: [id], onDelete: Cascade)
-    creatorId BigInt
-    color     String   @default("#484CFF")
-    pointX    Int      @default(0)
-    pointY    Int      @default(0)
-    updatedAt DateTime @updatedAt
+    id              BigInt   @id
+    story           Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
+    storyId         BigInt
+    unusedCreatorId BigInt?  @map("creatorId")
+    user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+    userId          BigInt
+    color           String   @default("#484CFF")
+    pointX          Int      @default(0)
+    pointY          Int      @default(0)
+    updatedAt       DateTime @updatedAt
 
     @@index([storyId], type: BTree)
-    @@index([creatorId], type: BTree)
+    @@index([userId], type: BTree)
     @@map("story_tags")
 }
 
@@ -2087,8 +2134,8 @@ model PostMediaTag {
     postMediaId BigInt
     user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
     userId      BigInt
-    pointX      Int       @default(0)
-    pointY      Int       @default(0)
+    pointX      Float     @default(0)
+    pointY      Float     @default(0)
     updatedAt   DateTime  @default(now()) @updatedAt
 
     @@index([postMediaId], type: BTree)

@@ -45,7 +45,7 @@ async function getPayoutInfo(prisma: PrismaService, payout: PayoutLog) {
 			: undefined;
 
 		paymentMethodData = {
-			provider: paymentMethod.provider,
+			payoutMethod: paymentMethod.payoutMethod,
 			bankInfo,
 			paypalEmail: paymentMethod.paypalEmail,
 			country: paymentMethod.country,

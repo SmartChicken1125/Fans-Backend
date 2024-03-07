@@ -10,7 +10,7 @@ import { APIError, APIErrorException } from "../APIErrors/index.js";
 
 declare module "fastify" {
 	interface FastifyReply {
-		sendError(error: APIError): void;
+		sendError(error: APIError): this;
 	}
 }
 

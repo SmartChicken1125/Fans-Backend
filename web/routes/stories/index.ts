@@ -68,7 +68,7 @@ export default async function routes(fastify: FastifyTypebox) {
 						storyLikes: true,
 						upload: true,
 						storyTags: {
-							include: { creator: true },
+							include: { user: true },
 						},
 						storyUrls: true,
 						storyTexts: true,
@@ -125,7 +125,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				include: {
 					upload: true,
 					storyTags: {
-						include: { creator: true },
+						include: { user: true },
 					},
 					storyUrls: true,
 					storyTexts: true,
@@ -216,7 +216,7 @@ export default async function routes(fastify: FastifyTypebox) {
 									createMany: {
 										data: storyTags.map((st) => ({
 											id: snowflake.gen(),
-											creatorId: BigInt(st.creatorId),
+											userId: BigInt(st.userId),
 											color: st.color,
 											pointX: st.pointX,
 											pointY: st.pointY,
@@ -241,7 +241,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				include: {
 					upload: true,
 					storyTags: {
-						include: { creator: true },
+						include: { user: true },
 					},
 					storyUrls: true,
 					storyTexts: true,
@@ -398,7 +398,7 @@ export default async function routes(fastify: FastifyTypebox) {
 							include: {
 								upload: true,
 								storyTags: {
-									include: { creator: true },
+									include: { user: true },
 								},
 								storyUrls: true,
 								storyTexts: true,
@@ -502,7 +502,7 @@ export default async function routes(fastify: FastifyTypebox) {
 					include: {
 						upload: true,
 						storyTags: {
-							include: { creator: true },
+							include: { user: true },
 						},
 						storyUrls: true,
 						storyTexts: true,
@@ -593,7 +593,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				include: {
 					upload: true,
 					storyTags: {
-						include: { creator: true },
+						include: { user: true },
 					},
 					storyUrls: true,
 					storyTexts: true,
@@ -674,7 +674,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				include: {
 					upload: true,
 					storyTags: {
-						include: { creator: true },
+						include: { user: true },
 					},
 					storyUrls: true,
 					storyTexts: true,
@@ -741,7 +741,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				include: {
 					upload: true,
 					storyTags: {
-						include: { creator: true },
+						include: { user: true },
 					},
 					storyUrls: true,
 					storyTexts: true,

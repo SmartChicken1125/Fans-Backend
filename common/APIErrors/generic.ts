@@ -38,6 +38,14 @@ export const genericAPIErrors = {
 			message: "Not found",
 		},
 	},
+	DEVELOPMENT_ONLY: {
+		status: 400,
+		data: {
+			code: errorCode(ErrorSource.Generic, 5),
+			message:
+				"Access to this feature is currently restricted to developers",
+		},
+	},
 	USER_NOT_FOUND: {
 		status: 404,
 		data: {

@@ -165,4 +165,12 @@ export const authAPIErrors = {
 			message: "Captcha provider is not supported",
 		},
 	},
+	PROFILE_REQUIRED: {
+		status: 400,
+		data: {
+			code: errorCode(ErrorSource.Auth, 24),
+			message:
+				"You need to create a profile in order to perform this action",
+		},
+	},
 };

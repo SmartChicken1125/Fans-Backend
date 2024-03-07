@@ -146,7 +146,7 @@ class PayoutService {
 			await Promise.all([
 				this.prisma.payoutSchedule.findFirst({ where: { profileId } }),
 				this.prisma.payoutPaymentMethod.findFirst({
-					where: { profileId, provider: PaymentProvider.PayPal },
+					where: { profileId },
 				}),
 				this.prisma.balance.findFirst({ where: { profileId } }),
 				this.prisma.payoutLog.findMany({

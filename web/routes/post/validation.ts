@@ -104,6 +104,7 @@ export const PostCreateReqBodyValidator = Type.Object({
 		Type.Object({
 			startDate: Type.String(),
 			endDate: Type.Optional(Type.String()),
+			timezone: Type.String(),
 		}),
 	),
 });
@@ -201,6 +202,7 @@ export const PostUpdateReqBodyValidator = Type.Object({
 		Type.Object({
 			startDate: Type.String(),
 			endDate: Type.Optional(Type.String()),
+			timezone: Type.String(),
 		}),
 	),
 });

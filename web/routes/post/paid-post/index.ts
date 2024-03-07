@@ -56,7 +56,12 @@ export default async function routes(fastify: FastifyTypebox) {
 				const { id } = request.params;
 				const row = await prisma.paidPost.findFirst({
 					where: { id: BigInt(id) },
-					include: { thumbs: { include: { upload: true } } },
+					include: {
+						thumbs: { include: { upload: true } },
+						tierPaidPosts: true,
+						rolePaidPosts: true,
+						userPaidPosts: true,
+					},
 				});
 				if (!row)
 					return reply.sendError(
@@ -653,6 +658,9 @@ export default async function routes(fastify: FastifyTypebox) {
 							  ],
 					include: {
 						thumbs: { include: { upload: true } },
+						tierPaidPosts: true,
+						rolePaidPosts: true,
+						userPaidPosts: true,
 						post: {
 							include: {
 								thumbMedia: true,
@@ -669,6 +677,9 @@ export default async function routes(fastify: FastifyTypebox) {
 								paidPost: {
 									include: {
 										thumbs: { include: { upload: true } },
+										tierPaidPosts: true,
+										rolePaidPosts: true,
+										userPaidPosts: true,
 									},
 								},
 								fundraiser: {
@@ -1027,6 +1038,9 @@ export default async function routes(fastify: FastifyTypebox) {
 										thumbs: {
 											include: { upload: true },
 										},
+										tierPaidPosts: true,
+										rolePaidPosts: true,
+										userPaidPosts: true,
 									},
 								},
 								fundraiser: {
@@ -1347,6 +1361,9 @@ export default async function routes(fastify: FastifyTypebox) {
 				data: { isPinned: true },
 				include: {
 					thumbs: { include: { upload: true } },
+					tierPaidPosts: true,
+					rolePaidPosts: true,
+					userPaidPosts: true,
 					post: {
 						include: {
 							thumbMedia: true,
@@ -1415,6 +1432,9 @@ export default async function routes(fastify: FastifyTypebox) {
 				data: { isPinned: false },
 				include: {
 					thumbs: { include: { upload: true } },
+					tierPaidPosts: true,
+					rolePaidPosts: true,
+					userPaidPosts: true,
 					post: {
 						include: {
 							thumbMedia: true,
@@ -1516,6 +1536,9 @@ export default async function routes(fastify: FastifyTypebox) {
 							  ],
 					include: {
 						thumbs: { include: { upload: true } },
+						tierPaidPosts: true,
+						rolePaidPosts: true,
+						userPaidPosts: true,
 						post: {
 							include: {
 								thumbMedia: true,

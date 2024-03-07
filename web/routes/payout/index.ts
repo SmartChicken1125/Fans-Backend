@@ -1,18 +1,22 @@
-import { EntityType, PayoutMode, TransactionStatus } from "@prisma/client";
+import {
+	EntityType,
+	PayoutMethod,
+	PayoutMode,
+	TransactionStatus,
+} from "@prisma/client";
 import { FastifyPluginOptions } from "fastify";
 import { DEFAULT_PAGE_SIZE, isOutOfRange } from "../../../common/pagination.js";
 import PayPalService from "../../../common/service/PayPalService.js";
 import PrismaService from "../../../common/service/PrismaService.js";
 import SessionManagerService from "../../../common/service/SessionManagerService.js";
 import SnowflakeService from "../../../common/service/SnowflakeService.js";
-import { PageQuery } from "../../../common/validators/schemas.js";
-import { PageQueryValidator } from "../../../common/validators/validation.js";
 import APIErrors from "../../errors/index.js";
 import { ModelConverter } from "../../models/modelConverter.js";
 import { FastifyTypebox } from "../../types.js";
 import {
 	DeletePayoutMethodReqBody,
 	GetPayoutMethodReqBody,
+	PayoutLogReqQuery,
 	PayoutLogsRespBody,
 	PayoutMethodReqBody,
 	PutPayoutMethodReqBody,
@@ -21,6 +25,7 @@ import {
 import {
 	DeletePayoutMethodReqBodyValidator,
 	GetPayoutMethodReqBodyValidator,
+	PayoutLogReqQueryValidator,
 	PayoutMethodReqBodyValidator,
 	PutPayoutMethodReqBodyValidator,
 	UpdatePayoutScheduleReqBodyValidator,
@@ -40,7 +45,7 @@ export default async function routes(
 	const paypalService = await container.resolve(PayPalService);
 
 	fastify.get(
-		"/payment-methods",
+		"/payment-method",
 		{
 			preHandler: [
 				sessionManager.sessionPreHandler,
@@ -48,46 +53,191 @@ export default async function routes(
 			],
 		},
 		async (request, reply) => {
-			try {
-				const session = request.session!;
-				const profile = await session.getProfile(prisma);
+			const session = request.session!;
+			const profile = await session.getProfile(prisma);
 
-				if (!profile) {
-					return reply.sendError(APIErrors.UNAUTHORIZED);
-				}
-
-				const payoutPaymentMethods =
-					await prisma.payoutPaymentMethod.findMany({
-						where: { profileId: BigInt(profile.id) },
-						select: {
-							id: true,
-							provider: true,
-							paypalEmail: true,
-							bankInfo: true,
-							country: true,
-							entityType: true,
-							usCitizenOrResident: true,
-						},
-					});
-
-				if (payoutPaymentMethods && payoutPaymentMethods.length > 0) {
-					return reply.send(
-						payoutPaymentMethods.map((p) => ({
-							...p,
-							bankInfo: {
-								...p.bankInfo,
-								bankAccountNumber:
-									"************" +
-									p.bankInfo?.bankAccountNumber.slice(-4),
-							},
-						})),
-					);
-				} else {
-					return reply.sendError(APIErrors.PAYMENT_METHODS_NOT_FOUND);
-				}
-			} catch (error) {
-				return reply.sendError(APIErrors.GENERIC_ERROR);
+			if (!profile) {
+				return reply.sendError(APIErrors.UNAUTHORIZED);
 			}
+
+			const payoutPaymentMethod =
+				await prisma.payoutPaymentMethod.findFirst({
+					where: { profileId: BigInt(profile.id), isDeleted: false },
+				});
+
+			if (!payoutPaymentMethod) {
+				return reply.sendError(APIErrors.PAYMENT_METHOD_NOT_FOUND);
+			}
+
+			if (payoutPaymentMethod.bankInfoId) {
+				const bankInfo = await prisma.bankInfo.findUnique({
+					where: { id: payoutPaymentMethod.bankInfoId },
+				});
+
+				if (bankInfo) {
+					payoutPaymentMethod.accountNumber =
+						bankInfo.bankAccountNumber;
+					payoutPaymentMethod.routingNumber =
+						bankInfo.bankRoutingNumber;
+				}
+			}
+
+			reply.send(payoutPaymentMethod);
+		},
+	);
+
+	fastify.post<{ Body: PayoutMethodReqBody }>(
+		"/payment-method",
+		{
+			schema: {
+				body: PayoutMethodReqBodyValidator,
+			},
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+			],
+		},
+		async (request, reply) => {
+			const {
+				country,
+				state,
+				city,
+				street,
+				unit,
+				zip,
+				entityType,
+				usCitizenOrResident,
+				firstName,
+				lastName,
+				company,
+				payoutMethod,
+				revolut,
+				payoneer,
+				routingNumber,
+				accountNumber,
+				iban,
+				swift,
+			} = request.body;
+
+			const session = request.session!;
+			const profile = await session.getProfile(prisma);
+
+			if (!profile) {
+				return reply.sendError(APIErrors.UNAUTHORIZED);
+			}
+
+			// if (
+			// 	!profile.ageVerifyId ||
+			// 	profile.ageVerifyStatus === "ACCEPTED"
+			// ) {
+			// 	return reply.sendError(APIErrors.AGE_VERIFICATION_REQUIRED);
+			// }
+
+			const payoutPaymentMethod =
+				await prisma.payoutPaymentMethod.findFirst({
+					where: {
+						profileId: BigInt(profile.id),
+						isDeleted: false,
+					},
+				});
+
+			const updatedPayoutMethod = await prisma.payoutPaymentMethod.upsert(
+				{
+					where: {
+						id: payoutPaymentMethod?.id ?? snowflake.gen(),
+					},
+					update: {
+						country,
+						city,
+						state,
+						street,
+						unit,
+						zip,
+						entityType: entityType as EntityType,
+						usCitizenOrResident: usCitizenOrResident ?? false,
+						payoutMethod: payoutMethod as PayoutMethod,
+						firstName,
+						lastName,
+						company,
+						revolut,
+						payoneer,
+						routingNumber,
+						accountNumber,
+						iban,
+						swift,
+					},
+					create: {
+						id: snowflake.gen(),
+						profileId: BigInt(profile.id),
+						country,
+						city,
+						state,
+						street,
+						unit,
+						zip,
+						entityType: entityType as EntityType,
+						usCitizenOrResident: false,
+						payoutMethod: payoutMethod as PayoutMethod,
+						firstName,
+						lastName,
+						company,
+						revolut,
+						payoneer,
+						routingNumber,
+						accountNumber,
+						iban,
+						swift,
+						unusedProvider: "PayPal",
+					},
+				},
+			);
+
+			reply.send(updatedPayoutMethod);
+		},
+	);
+
+	fastify.delete(
+		"/payment-method",
+		{
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session!;
+			const profile = await session.getProfile(prisma);
+
+			if (!profile) {
+				return reply.sendError(APIErrors.UNAUTHORIZED);
+			}
+
+			// if (
+			// 	!profile.ageVerifyId ||
+			// 	profile.ageVerifyStatus === "ACCEPTED"
+			// ) {
+			// 	return reply.sendError(APIErrors.AGE_VERIFICATION_REQUIRED);
+			// }
+
+			const payoutMethod = await prisma.payoutPaymentMethod.findFirst({
+				where: {
+					profileId: profile.id,
+					isDeleted: false,
+				},
+			});
+
+			if (!payoutMethod) {
+				return reply.sendError(APIErrors.PAYMENT_METHOD_NOT_FOUND);
+			}
+
+			await prisma.payoutPaymentMethod.update({
+				where: { id: payoutMethod.id },
+				data: {
+					isDeleted: true,
+				},
+			});
+
+			reply.status(201).send();
 		},
 	);
 
@@ -166,7 +316,7 @@ export default async function routes(
 					await prisma.payoutPaymentMethod.findFirst({
 						where: {
 							profileId: BigInt(profile.id),
-							provider: "Bank",
+							isDeleted: false,
 						},
 					});
 
@@ -297,7 +447,6 @@ export default async function routes(
 						},
 						select: {
 							id: true,
-							provider: true,
 							paypalEmail: true,
 							bankInfo: true,
 							country: true,
@@ -311,91 +460,6 @@ export default async function routes(
 				}
 
 				reply.send(payoutMethod);
-			} catch (error) {
-				console.log(error);
-				return reply.sendError(APIErrors.GENERIC_ERROR);
-			}
-		},
-	);
-
-	fastify.post<{ Body: PayoutMethodReqBody }>(
-		"/payment-method",
-		{
-			schema: {
-				body: PayoutMethodReqBodyValidator,
-			},
-			preHandler: [
-				sessionManager.sessionPreHandler,
-				sessionManager.requireAuthHandler,
-			],
-		},
-		async (request, reply) => {
-			try {
-				const {
-					paypalEmail,
-					bankInfo,
-					country,
-					entityType,
-					usCitizenOrResident,
-				} = request.body;
-
-				const session = request.session!;
-				const profile = await session.getProfile(prisma);
-
-				if (!profile) {
-					return reply.sendError(APIErrors.UNAUTHORIZED);
-				}
-
-				// if (
-				// 	!profile.ageVerifyId ||
-				// 	profile.ageVerifyStatus === "ACCEPTED"
-				// ) {
-				// 	return reply.sendError(APIErrors.AGE_VERIFICATION_REQUIRED);
-				// }
-
-				const newPayoutMethod = await prisma.payoutPaymentMethod.create(
-					{
-						data: {
-							id: snowflake.gen(),
-							profileId: BigInt(profile.id),
-							provider: paypalEmail ? "PayPal" : "Bank",
-							paypalEmail,
-							country,
-							entityType: entityType as EntityType,
-							usCitizenOrResident,
-						},
-					},
-				);
-
-				let bankInfoId;
-				if (bankInfo) {
-					const createdBankInfo = await prisma.bankInfo.create({
-						data: {
-							id: snowflake.gen(),
-							payoutPaymentMethodId: BigInt(newPayoutMethod.id),
-							firstName: bankInfo.firstName,
-							lastName: bankInfo.lastName,
-							address1: bankInfo.address1,
-							address2: bankInfo.address2,
-							city: bankInfo.city,
-							state: bankInfo.state,
-							zip: bankInfo.zip,
-							bankRoutingNumber: bankInfo.bankRoutingNumber,
-							bankAccountNumber: bankInfo.bankAccountNumber,
-						},
-					});
-					bankInfoId = createdBankInfo.id;
-				}
-
-				await prisma.payoutPaymentMethod.update({
-					where: { id: BigInt(newPayoutMethod.id) },
-					data: { bankInfoId },
-				});
-
-				reply.send({
-					message: "Successfully added PayPal payout method.",
-					payoutMethod: newPayoutMethod,
-				});
 			} catch (error) {
 				console.log(error);
 				return reply.sendError(APIErrors.GENERIC_ERROR);
@@ -537,8 +601,11 @@ export default async function routes(
 					return reply.sendError(APIErrors.PAYMENT_METHOD_NOT_FOUND);
 				}
 
-				await prisma.payoutPaymentMethod.delete({
+				await prisma.payoutPaymentMethod.update({
 					where: { id: BigInt(id) },
+					data: {
+						isDeleted: true,
+					},
 				});
 
 				reply.send({
@@ -582,7 +649,7 @@ export default async function routes(
 
 				const existingPayoutSchedule =
 					await prisma.payoutSchedule.findFirst({
-						where: { profileId: BigInt(profile.id) },
+						where: { profileId: profile.id },
 					});
 
 				if (existingPayoutSchedule) {
@@ -722,11 +789,11 @@ export default async function routes(
 		}
 	});
 
-	fastify.get<{ Querystring: PageQuery }>(
+	fastify.get<{ Querystring: PayoutLogReqQuery }>(
 		"/logs",
 		{
 			schema: {
-				querystring: PageQueryValidator,
+				querystring: PayoutLogReqQueryValidator,
 			},
 			preHandler: [
 				sessionManager.sessionPreHandler,
@@ -737,7 +804,12 @@ export default async function routes(
 		async (request, reply) => {
 			const session = request.session!;
 			const profile = (await session.getProfile(prisma))!;
-			const { page = 1, size = DEFAULT_PAGE_SIZE } = request.query;
+			const {
+				page = 1,
+				size = DEFAULT_PAGE_SIZE,
+				filter,
+				orderBy,
+			} = request.query;
 			const total = await prisma.payoutLog.count({
 				where: { profileId: profile.id },
 				orderBy: { createdAt: "desc" },
@@ -747,15 +819,30 @@ export default async function routes(
 				return reply.sendError(APIErrors.OUT_OF_RANGE);
 			}
 
+			const status =
+				filter === "Pending"
+					? TransactionStatus.Pending
+					: filter === "Declined"
+					? {
+							notIn: [
+								TransactionStatus.Successful,
+								TransactionStatus.Pending,
+							],
+					  }
+					: undefined;
+
 			const rows = await prisma.payoutLog.findMany({
-				where: { profileId: profile.id },
-				orderBy: { createdAt: "desc" },
+				where: { profileId: profile.id, status: status },
+				orderBy: { createdAt: orderBy === "Oldest" ? "asc" : "desc" },
 				take: size,
 				skip: (page - 1) * size,
+				include: { payoutPaymentMethod: true },
 			});
 
 			const result: PayoutLogsRespBody = {
-				payoutLogs: rows.map((log) => ModelConverter.toIPayoutLog(log)),
+				payoutLogs: rows.map((log) =>
+					ModelConverter.toIPayoutLog(log, log.payoutPaymentMethod),
+				),
 				page,
 				size,
 				total,

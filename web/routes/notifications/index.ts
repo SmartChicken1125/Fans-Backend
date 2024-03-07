@@ -64,6 +64,23 @@ export default async function routes(fastify: FastifyTypebox) {
 		},
 	);
 
+	fastify.post(
+		"/mark-all-read",
+		{
+			preHandler: [
+				sessionManager.sessionPreHandler,
+				sessionManager.requireAuthHandler,
+			],
+		},
+		async (request, reply) => {
+			const session = request.session!;
+
+			notification.markAllAsRead(BigInt(session.userId));
+
+			return reply.send();
+		},
+	);
+
 	fastify.get(
 		"/settings",
 		{

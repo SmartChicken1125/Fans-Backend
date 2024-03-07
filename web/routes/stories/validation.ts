@@ -16,7 +16,7 @@ export const StoryCreateReqBodyValidator = Type.Object({
 	storyTags: Type.Optional(
 		Type.Array(
 			Type.Object({
-				creatorId: Type.String(),
+				userId: Type.String(),
 				color: Type.String(),
 				pointX: Type.Number(),
 				pointY: Type.Number(),

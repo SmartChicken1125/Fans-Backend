@@ -7,7 +7,7 @@ export type CreateStoryUrl = {
 };
 
 export type CreateStoryTag = {
-	creatorId: string;
+	userId: string;
 	color: string;
 	pointX: number;
 	pointY: number;

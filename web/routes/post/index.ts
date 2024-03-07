@@ -60,7 +60,7 @@ import {
 	SendInvitationReqBodyValidator,
 } from "./validation.js";
 import XPService from "../../../common/service/XPService.js";
-import { create } from "node:domain";
+import { devOnlyCheckMiddleware } from "../../../common/utils/UtilityMiddleware.js";
 
 export default async function routes(fastify: FastifyTypebox) {
 	const { container } = fastify;
@@ -141,6 +141,9 @@ export default async function routes(fastify: FastifyTypebox) {
 					paidPost: {
 						include: {
 							thumbs: { include: { upload: true } },
+							tierPaidPosts: true,
+							rolePaidPosts: true,
+							userPaidPosts: true,
 						},
 					},
 					thumbMedia: true,
@@ -249,6 +252,9 @@ export default async function routes(fastify: FastifyTypebox) {
 					paidPost: {
 						include: {
 							thumbs: { include: { upload: true } },
+							tierPaidPosts: true,
+							rolePaidPosts: true,
+							userPaidPosts: true,
 						},
 					},
 					thumbMedia: true,
@@ -316,7 +322,7 @@ export default async function routes(fastify: FastifyTypebox) {
 
 			const [row, accessiblePaidPosts] = await Promise.all([
 				prisma.post.findFirst({
-					where: { id: BigInt(id) },
+					where: { id: BigInt(id), profile: { disabled: false } },
 					include: {
 						roles: {
 							include: { role: true },
@@ -326,6 +332,9 @@ export default async function routes(fastify: FastifyTypebox) {
 						paidPost: {
 							include: {
 								thumbs: { include: { upload: true } },
+								tierPaidPosts: true,
+								rolePaidPosts: true,
+								userPaidPosts: true,
 								PaidPostTransaction: {
 									where: {
 										userId: BigInt(session.userId),
@@ -415,6 +424,7 @@ export default async function routes(fastify: FastifyTypebox) {
 				}),
 				prisma.post.findMany({
 					where: {
+						profile: { disabled: false },
 						paidPost: {
 							OR: [
 								{
@@ -547,6 +557,9 @@ export default async function routes(fastify: FastifyTypebox) {
 				profile: ModelConverter.toIProfile(row.profile),
 				paidPost: row.paidPost
 					? ModelConverter.toIPaidPost(row.paidPost)
+					: undefined,
+				schedule: row.schedule
+					? ModelConverter.toISchedule(row.schedule)
 					: undefined,
 			};
 			return reply.send(result);
@@ -814,6 +827,7 @@ export default async function routes(fastify: FastifyTypebox) {
 									endDate: data.schedule.endDate
 										? new Date(data.schedule.endDate)
 										: undefined,
+									timezone: data.schedule.timezone,
 								},
 						  }
 						: undefined,
@@ -1019,6 +1033,9 @@ export default async function routes(fastify: FastifyTypebox) {
 					paidPost: {
 						include: {
 							thumbs: { include: { upload: true } },
+							tierPaidPosts: true,
+							rolePaidPosts: true,
+							userPaidPosts: true,
 						},
 					},
 					schedule: true,
@@ -1365,6 +1382,9 @@ export default async function routes(fastify: FastifyTypebox) {
 				querystring: QueryWithPageParamsValidator,
 			},
 			preHandler: [
+				// TODO: ~alula THIS ENDPOINT IS UNFINISHED AND HAS SERIOUS SECURITY ISSUES
+				// IT LISTS EVERY POST IN THE DATABASE WITH SIGNED URLS AND SHIT
+				devOnlyCheckMiddleware,
 				sessionManager.sessionPreHandler,
 				sessionManager.requireAuthHandler,
 			],
@@ -1425,12 +1445,16 @@ export default async function routes(fastify: FastifyTypebox) {
 						},
 					],
 					isPosted: true,
+					profile: { disabled: false },
 				},
 				include: {
 					profile: true,
 					paidPost: {
 						include: {
 							thumbs: { include: { upload: true } },
+							tierPaidPosts: true,
+							rolePaidPosts: true,
+							userPaidPosts: true,
 						},
 					},
 					thumbMedia: true,
@@ -1498,13 +1522,12 @@ export default async function routes(fastify: FastifyTypebox) {
 			} = request.query;
 			const session = request.session!;
 			const profile = await session.getProfile(prisma);
-			const user = await prisma.user.findFirst({
-				where: { id: BigInt(session.userId) },
-			});
 			const paymentSubscriptions =
 				await prisma.paymentSubscription.findMany({
+					select: { creatorId: true },
 					where: {
 						userId: BigInt(session.userId),
+						creator: { disabled: false },
 						OR: [
 							{
 								status: SubscriptionStatus.Active,
@@ -1534,6 +1557,7 @@ export default async function routes(fastify: FastifyTypebox) {
 								userlistId: {
 									in: userLists.map((ul) => ul.id),
 								},
+								profile: { disabled: false },
 							},
 							select: { profileId: true },
 					  })
@@ -1602,6 +1626,7 @@ export default async function routes(fastify: FastifyTypebox) {
 						},
 					},
 				],
+				profile: { disabled: false },
 				profileId: {
 					in: activeCreatorIds
 						? activeCreatorIds
@@ -1668,6 +1693,9 @@ export default async function routes(fastify: FastifyTypebox) {
 						paidPost: {
 							include: {
 								thumbs: { include: { upload: true } },
+								tierPaidPosts: true,
+								rolePaidPosts: true,
+								userPaidPosts: true,
 							},
 						},
 						fundraiser: {
@@ -2128,11 +2156,6 @@ export default async function routes(fastify: FastifyTypebox) {
 										stories: {
 											where: {
 												id: { notIn: hiddenStoryIds },
-												profile: {
-													userId: BigInt(
-														session.userId,
-													),
-												},
 												updatedAt: { gt: oneDayBefore },
 											},
 											include: {
@@ -2151,6 +2174,9 @@ export default async function routes(fastify: FastifyTypebox) {
 								paidPost: {
 									include: {
 										thumbs: { include: { upload: true } },
+										tierPaidPosts: true,
+										rolePaidPosts: true,
+										userPaidPosts: true,
 									},
 								},
 								categories: {

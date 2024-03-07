@@ -204,25 +204,25 @@ class SessionManagerService {
 	static MAX_AGE = 2592000;
 
 	/**
-	 * A request-pre handler that resolves the session token from the request and puts it in the request object.
+	 * A request pre-handler that resolves the session token from the request and puts session information in the request object.
 	 */
 	sessionPreHandler: preHandlerAsyncHookHandler;
 
 	/**
-	 * A request-pre handler that checks if the user is authenticated and if not, returns an UNAUTHORIZED error.
+	 * A request pre-handler that checks if the user is authenticated and if not, returns an UNAUTHORIZED error.
 	 * It also checks if the user has verified their email and if not, returns an VERIFICATION_REQUIRED error.
 	 */
 	requireAuthHandler: preHandlerAsyncHookHandler;
 
 	/**
-	 * A request-pre handler that checks if the user is authenticated and if not, returns an UNAUTHORIZED error.
+	 * A request pre-handler that checks if the user is authenticated and if not, returns an UNAUTHORIZED error.
 	 * Pretty much the same as requireAuthHandler, but it doesn't check if the user has verified their email.
 	 */
 	requireAuthNoVerificationHandler: preHandlerAsyncHookHandler;
 
 	/**
 	 * A request pre-handler that checks if the user is authenticated and has a profile.
-	 * If not, returns an UNAUTHORIZED error.
+	 * If not, returns a PROFILE_REQUIRED error.
 	 */
 	requireProfileHandler: preHandlerAsyncHookHandler;
 
@@ -287,11 +287,7 @@ class SessionManagerService {
 				.catch(() => null);
 
 			if (!profile) {
-				reply.sendError(
-					genericAPIErrors.INVALID_REQUEST(
-						"You don't have active profile yet!",
-					),
-				);
+				reply.sendError(authAPIErrors.PROFILE_REQUIRED);
 			}
 		};
 	}

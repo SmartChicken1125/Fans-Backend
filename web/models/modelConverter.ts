@@ -11,7 +11,6 @@ import {
 	CreatorReferralTransaction,
 	FanReferral,
 	FanReferralTransaction,
-	FanReferralTransactionType,
 	Fundraiser,
 	GemTransaction,
 	GemsBalance,
@@ -71,6 +70,11 @@ import {
 	TransactionStatus,
 	VideoCall,
 	PaidPostThumb,
+	PayoutPaymentMethod,
+	PayoutMethod,
+	TierPaidPost,
+	RolePaidPost,
+	UserPaidPost,
 } from "@prisma/client";
 import {
 	IApplication,
@@ -659,6 +663,9 @@ export class ModelConverter {
 	static toIPaidPost(
 		paidPost: PaidPost & {
 			thumbs: (PaidPostThumb & { upload: Upload })[] | null;
+			tierPaidPosts: TierPaidPost[];
+			rolePaidPosts: RolePaidPost[];
+			userPaidPosts: UserPaidPost[];
 		},
 	): IPaidPost {
 		return {
@@ -675,6 +682,9 @@ export class ModelConverter {
 							blurhash: t.upload.blurhash ?? undefined,
 					  }))
 					: undefined,
+			tiers: paidPost.tierPaidPosts.map((tp) => tp.tierId.toString()),
+			roles: paidPost.rolePaidPosts.map((rp) => rp.roleId.toString()),
+			users: paidPost.userPaidPosts.map((up) => up.userId.toString()),
 			isPinned: paidPost.isPinned,
 			isHidden: paidPost.isHidden,
 			updatedAt: paidPost.updatedAt.toISOString(),
@@ -755,6 +765,7 @@ export class ModelConverter {
 			endDate: schedule.endDate
 				? schedule.endDate.toISOString()
 				: undefined,
+			timezone: schedule.timezone ?? "",
 			updatedAt: schedule.updatedAt.toISOString(),
 		};
 	}
@@ -1020,7 +1031,7 @@ export class ModelConverter {
 				storyComments?: number;
 			};
 			upload: Upload;
-			storyTags?: (StoryTag & { creator: Profile })[];
+			storyTags?: (StoryTag & { user: User })[];
 			storyUrls?: StoryUrl[];
 			storyTexts?: StoryText[];
 		},
@@ -1074,12 +1085,12 @@ export class ModelConverter {
 		};
 	}
 
-	static toIStoryTag(storyTag: StoryTag & { creator: Profile }): IStoryTag {
+	static toIStoryTag(storyTag: StoryTag & { user: User }): IStoryTag {
 		return {
 			id: storyTag.id.toString(),
 			storyId: storyTag.storyId.toString(),
-			creatorId: storyTag.creatorId.toString(),
-			creator: this.toIProfile(storyTag.creator),
+			userId: storyTag.userId.toString(),
+			user: this.toIUser(storyTag.user),
 			color: storyTag.color,
 			pointX: storyTag.pointX,
 			pointY: storyTag.pointY,
@@ -1383,11 +1394,26 @@ export class ModelConverter {
 		};
 	}
 
-	static toIPayoutLog(payoutLog: PayoutLog): IPayoutLog {
+	static toIPayoutLog(
+		payoutLog: PayoutLog,
+		payoutPaymentMethod?: PayoutPaymentMethod,
+	): IPayoutLog {
 		return {
 			id: payoutLog.id.toString(),
 			profileId: payoutLog.profileId.toString(),
 			payoutPaymentMethodId: payoutLog.payoutPaymentMethodId.toString(),
+			paymentInformation:
+				payoutPaymentMethod?.payoutMethod === PayoutMethod.IBAN
+					? payoutPaymentMethod?.iban!
+					: payoutPaymentMethod?.payoutMethod ===
+					  PayoutMethod.Payoneer
+					? payoutPaymentMethod?.payoneer!
+					: payoutPaymentMethod?.payoutMethod === PayoutMethod.Revolut
+					? payoutPaymentMethod?.revolut!
+					: payoutPaymentMethod?.payoutMethod ===
+					  PayoutMethod.DirectDeposit
+					? payoutPaymentMethod?.accountNumber!
+					: "",
 			amount: payoutLog.amount,
 			processingFee: payoutLog.processingFee,
 			currency: payoutLog.currency,
