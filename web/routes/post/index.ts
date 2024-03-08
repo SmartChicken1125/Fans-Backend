@@ -1157,6 +1157,7 @@ export default async function routes(fastify: FastifyTypebox) {
 					categories: true,
 					users: true,
 					schedule: true,
+					tiers: true,
 				},
 			});
 			if (!post) return reply.sendError(APIErrors.ITEM_NOT_FOUND("Post"));
@@ -1195,8 +1196,16 @@ export default async function routes(fastify: FastifyTypebox) {
 			let rolesToRemove: string[] = [];
 			if (data.roles && data.roles.length > 0) {
 				rolesToAdd = data.roles.filter((r) => !roleIds.includes(r));
-				rolesToRemove = roleIds.filter((r) => !data.roles?.includes(r));
 			}
+			rolesToRemove = roleIds.filter((r) => !data.roles?.includes(r));
+
+			const tierIds = post.tiers.map((r) => r.tierId.toString());
+			let tiersToAdd: string[] = [];
+			let tiersToRemove: string[] = [];
+			if (data.tiers && data.tiers.length > 0) {
+				tiersToAdd = data.tiers.filter((r) => !tierIds.includes(r));
+			}
+			tiersToRemove = tierIds.filter((r) => !data.tiers?.includes(r));
 
 			const categoryIds = post.categories.map((c) =>
 				c.categoryId.toString(),
@@ -1207,18 +1216,18 @@ export default async function routes(fastify: FastifyTypebox) {
 				categoriesToAdd = data.categories.filter(
 					(c) => !categoryIds.includes(c),
 				);
-				categoriesToRemove = categoryIds.filter(
-					(c) => !data.categories?.includes(c),
-				);
 			}
+			categoriesToRemove = categoryIds.filter(
+				(c) => !data.categories?.includes(c),
+			);
 
 			const userIds = post.users.map((c) => c.userId.toString());
 			let usersToAdd: string[] = [];
 			let usersToRemove: string[] = [];
 			if (data.users && data.users.length > 0) {
 				usersToAdd = data.users.filter((c) => !userIds.includes(c));
-				usersToRemove = userIds.filter((c) => !data.users?.includes(c));
 			}
+			usersToRemove = userIds.filter((c) => !data.users?.includes(c));
 
 			await prisma.post.update({
 				where: { id: BigInt(id) },
@@ -1233,11 +1242,15 @@ export default async function routes(fastify: FastifyTypebox) {
 						Prisma.JsonNull,
 					location: data.location,
 					schedule: {
-						update: {
-							startDate: data.schedule?.startDate ?? undefined,
-							endDate: data.schedule?.endDate ?? undefined,
-							jobId: newJobId ?? undefined,
-						},
+						update: newJobId
+							? {
+									startDate:
+										data.schedule?.startDate ?? undefined,
+									endDate:
+										data.schedule?.endDate ?? undefined,
+									jobId: newJobId ?? undefined,
+							  }
+							: undefined,
 					},
 					roles: {
 						deleteMany:
@@ -1252,6 +1265,23 @@ export default async function routes(fastify: FastifyTypebox) {
 										data: rolesToAdd.map((r) => ({
 											id: snowflake.gen(),
 											roleId: BigInt(r),
+										})),
+								  }
+								: undefined,
+					},
+					tiers: {
+						deleteMany:
+							tiersToRemove.length > 0
+								? tiersToRemove.map((r) => ({
+										tierId: BigInt(r),
+								  }))
+								: undefined,
+						createMany:
+							tiersToAdd.length > 0
+								? {
+										data: tiersToAdd.map((r) => ({
+											id: snowflake.gen(),
+											tierId: BigInt(r),
 										})),
 								  }
 								: undefined,

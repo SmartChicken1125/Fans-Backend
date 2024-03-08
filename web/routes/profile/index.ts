@@ -838,7 +838,7 @@ export default async function routes(fastify: FastifyTypebox) {
 	);
 
 	fastify.get<{ Params: ProfileLinkReqBody; Reply: ProfileRespBody }>(
-		"/link/:link",
+		"/link/:userId/:link",
 		{
 			schema: {
 				params: ProfileLinkReqBodyValidator,

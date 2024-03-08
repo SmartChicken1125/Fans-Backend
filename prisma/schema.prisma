@@ -2119,8 +2119,8 @@ model TaggedPeople {
     postId    BigInt
     user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
     userId    BigInt
-    pointX    Int      @default(0)
-    pointY    Int      @default(0)
+    pointX    Float      @default(0)
+    pointY    Float      @default(0)
     updatedAt DateTime @default(now()) @updatedAt
 
     @@index([postId], type: BTree)
