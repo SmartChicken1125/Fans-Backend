@@ -85,6 +85,7 @@ export interface TaggedPeople {
 }
 
 export interface PostMediaTags {
+	id: string;
 	userId: string;
 	pointX: number;
 	pointY: number;

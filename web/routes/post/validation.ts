@@ -23,6 +23,7 @@ export const PostCreateReqBodyValidator = Type.Object({
 				postMediaId: Type.String(),
 				tags: Type.Array(
 					Type.Object({
+						id: Type.String(),
 						userId: Type.String(),
 						pointX: Type.Number(),
 						pointY: Type.Number(),
@@ -121,6 +122,7 @@ export const PostUpdateReqBodyValidator = Type.Object({
 				postMediaId: Type.String(),
 				tags: Type.Array(
 					Type.Object({
+						id: Type.String(),
 						userId: Type.String(),
 						pointX: Type.Number(),
 						pointY: Type.Number(),

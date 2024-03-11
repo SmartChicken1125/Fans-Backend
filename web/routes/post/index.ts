@@ -42,6 +42,7 @@ import {
 	PostFeedQuery,
 	PostFilterQuery,
 	PostHideRespBody,
+	PostMediaTags,
 	PostRespBody,
 	PostUpdateReqBody,
 	PostsRespBody,
@@ -1158,6 +1159,11 @@ export default async function routes(fastify: FastifyTypebox) {
 					users: true,
 					schedule: true,
 					tiers: true,
+					postMedias: {
+						include: {
+							postMediaTags: true,
+						},
+					},
 				},
 			});
 			if (!post) return reply.sendError(APIErrors.ITEM_NOT_FOUND("Post"));
@@ -1228,7 +1234,77 @@ export default async function routes(fastify: FastifyTypebox) {
 				usersToAdd = data.users.filter((c) => !userIds.includes(c));
 			}
 			usersToRemove = userIds.filter((c) => !data.users?.includes(c));
+			post.postMedias?.map(async (media) => {
+				const tagIds = media.postMediaTags
+					.map((c) => c.id?.toString())
+					.filter((tagId) => tagId != undefined);
+				let tagsToAdd: PostMediaTags[] = [];
+				let tagsToRemove: string[] = [];
+				let tagsToUpdate: PostMediaTags[] = [];
 
+				const dataMedia = data.postMedias?.find(
+					(postMedia) =>
+						postMedia.postMediaId == media.uploadId.toString(),
+				);
+				if (dataMedia?.tags && dataMedia?.tags.length > 0) {
+					console.log(dataMedia.tags);
+
+					tagsToAdd =
+						dataMedia.tags.filter(
+							(c) =>
+								!tagIds.includes(c.id ? c.id.toString() : ""),
+						) ?? [];
+				}
+				tagsToRemove = tagIds.filter(
+					(c) =>
+						dataMedia?.tags?.findIndex(
+							(tag) => tag.id?.toString() === c,
+						) == -1,
+				);
+				tagsToUpdate =
+					dataMedia?.tags?.filter((tag) => {
+						return (
+							tagsToAdd.findIndex(
+								(tagToAdd) => tagToAdd.id == tag.id,
+							) == -1
+						);
+					}) ?? [];
+				console.log(
+					"aaaaaaaaaaaaaaaaaaaaaaA=",
+					tagsToUpdate,
+					tagsToAdd,
+					tagsToRemove,
+				);
+				await prisma.postMediaTag.createMany({
+					data: tagsToAdd.map((tag) => ({
+						id: snowflake.gen(),
+						userId: BigInt(tag.userId),
+						pointX: tag.pointX,
+						pointY: tag.pointY,
+						postMediaId: media.id,
+					})),
+				});
+
+				await prisma.postMediaTag.deleteMany({
+					where: {
+						id: {
+							in: tagsToRemove.map((tag) => BigInt(tag)),
+						},
+					},
+				});
+
+				const updates = tagsToUpdate.map((item) =>
+					prisma.postMediaTag.update({
+						where: { id: BigInt(item.id ?? 0) },
+						data: {
+							pointX: item.pointX,
+							pointY: item.pointY,
+						},
+					}),
+				);
+
+				await Promise.all(updates);
+			});
 			await prisma.post.update({
 				where: { id: BigInt(id) },
 				data: {
